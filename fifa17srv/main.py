@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import logging
+import subprocess
 import sys
+import threading
 import time
+from pathlib import Path
 
 from . import __version__, blaze, nucleus, pow_stub, qos, redirector, tcp_record, telemetry_stub
 from .analyze import analyze_file
@@ -21,6 +25,48 @@ fifa17-friendlies {ver}  --  Blaze preAuth handler (eksperymentalny)
   captures   : {logs}
 Start FIFA 17 now. Press Ctrl+C to stop.
 """
+
+
+class BufferedFileHandler(logging.FileHandler):
+    """Plik logu sesji bez flush przy kazdej linii (synchroniczny zapis potrafi zablokowac watki polaczen, patrz
+    Capture.note); bufory zrzuca watek co 2 s oraz przy wyjsciu."""
+
+    def flush(self) -> None:          # emit() wola flush() po kazdej linii -- tu celowo nic
+        pass
+
+    def real_flush(self) -> None:
+        try:
+            super().flush()
+        except Exception:
+            pass
+
+
+def _git_rev() -> str:
+    try:
+        root = Path(__file__).resolve().parent.parent
+        out = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%h %ad %s", "--date=iso"],
+                             capture_output=True, text=True, timeout=5)
+        return out.stdout.strip() or "(brak git)"
+    except Exception:
+        return "(brak git)"
+
+
+def _setup_session_log(cfg) -> Path:
+    """Caly log konsoli trafia tez do logs/session_<data>.log -- jeden plik do wyslania, bez wklejania z terminala."""
+    logs = cfg.log_dir_path.parent
+    logs.mkdir(parents=True, exist_ok=True)
+    path = logs / f"session_{time.strftime('%Y%m%d_%H%M%S')}.log"
+    handler = BufferedFileHandler(path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S"))
+    logging.getLogger().addHandler(handler)
+
+    def run():
+        while True:
+            time.sleep(2.0)
+            handler.real_flush()
+    threading.Thread(target=run, name="session-log-flusher", daemon=True).start()
+    atexit.register(handler.real_flush)
+    return path
 
 
 def cmd_certs(args) -> int:
@@ -44,6 +90,14 @@ def cmd_run(args) -> int:
     if args.no_chain:
         cfg.cert_send_chain = False
     ensure_certs(cfg)
+    session_log = _setup_session_log(cfg)
+    log = logging.getLogger("fifa17srv")
+    log.info("wersja kodu: %s", _git_rev())
+    log.info("config: gm_variant=%s gm_probes=%s gm_watchdog_remove=%s gm_host_initial_state=%s advertise=%s",
+             cfg.gm_variant, cfg.gm_probes, cfg.gm_watchdog_remove, cfg.gm_host_initial_state,
+             cfg.blaze_advertise_host)
+    print(f"  log sesji  : {session_log}")
+    print(f"  dziennik GameManager: {cfg.log_dir_path.parent / 'gm_attempts.log'}")
     ctx = make_tls_context(cfg)
     rsrv = Server("redirector", cfg.bind_address, cfg.redirector_port,
                   lambda c, a: redirector.handle(c, a, cfg, ctx)).start()

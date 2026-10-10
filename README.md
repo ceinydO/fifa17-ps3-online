@@ -68,7 +68,10 @@ nastepnej probie; porazka (watchdog 12 s) cofa do najnowszego dzialajacego i usu
 `gm_watchdog_remove`), zeby host mogl ponowic bez restartu. Stan: `state/gm_variant.json`. W logu serwera:
 `POZIOM n`, `WATCHDOG ...`, `SUKCES poziomu n`. Dodatkowo identyfikatory graczy sa teraz < 2^31
 (`ids.uid_for`: 1.1e9..2.0e9) -- host `odyniec` mial wczesniej uid 2 999 187 369, a stary dzialajacy przebieg uzywal
-tylko wartosci < 2^31. Selftest 40/40.
+tylko wartosci < 2^31.
+**Diagnostyka pod jeden test:** `logs/session_*.log` (caly log konsoli), `logs/gm_attempts.log` (dziennik prob: kazde
+powiadomienie GameManager rozkodowane, kazde zadanie klientow z czasem w ms, wynik), sondy po 3/6/9 s gdy host milczy
+(`gm_probes`), flush przechwytow co 2 s, `collect_logs.ps1` pakuje to wszystko do jednego zip-a. Selftest 43/43.
 
 ## Latest session: 2026-10-09 (analiza dekompilatorem, przebudowa GameManager)
 

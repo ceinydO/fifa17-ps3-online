@@ -119,6 +119,23 @@ def _gamemgr_checks() -> None:
           {o[0] for o in wd} == {"host", "guest"} and gamemgr.attempt_info(g3) is None)
     g4, *_ = setup_of(gamemgr.create_game(cfg2, "host", req, ["guest"], lookup))
     check("po porazce poziomu 3 auto wraca do najnowszego dzialajacego (2)", gamemgr.attempt_info(g4)[0] == 2)
+    # sondy + dziennik prob
+    from . import gmtrace
+    trace_path = Path(tempfile.mkdtemp(prefix="fifa17srv_gmtrace_")) / "gm_attempts.log"
+    gmtrace.configure(trace_path)
+    gmtrace.begin("host", g4, 2, "test", "powod", "opis", req)
+    pr = [gamemgr.probe_frames(cfg2, g4, n, lookup) for n in (1, 2, 3)]
+    check("sondy 1-3 daja powiadomienia dla hosta (PlatformHostInitialized; stan+JoinCompleted; GameStateChange)",
+          [len(x) for x in pr] == [1, 2, 1] and all(o[0] == "host" for x in pr for o in x))
+    gmtrace.server("host", pr[0][0][1], pr[0][0][2])
+    gmtrace.client("host", 4, 0x1D, 7, 0, [("GID ", tdf.VARINT, g4)])
+    gmtrace.outcome(g4, "test")
+    text = trace_path.read_text(encoding="utf-8")
+    check("dziennik prob zawiera rozkodowane powiadomienie, zadanie klienta i zestawienie",
+          "SONDA 1" in text and "komp=0x0004 cmd=0x001D" in text and "0x0004/0x001D x1" in text, text[-300:])
+    gamemgr.update_mesh_connection(cfg2, "host", [("GID ", tdf.VARINT, g4), ("STAT", tdf.VARINT, 2)], lookup)
+    check("po updateMeshConnection hosta sondy sie wylaczaja", gamemgr.host_reacted(g4)
+          and gamemgr.probe_frames(cfg2, g4, 1, lookup) == [])
     cfg3 = Config(state_dir=cfg2.state_dir, gm_variant=6)
     g6, o6, gsta6, st6, reas6 = setup_of(gamemgr.create_game(cfg3, "host", req, ["guest"], lookup))
     check("gm_variant=6 wymusza docelowy ksztalt: INITIALIZING, host sam, REAS DLSC",

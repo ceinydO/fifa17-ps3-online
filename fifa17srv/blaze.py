@@ -32,7 +32,7 @@ import ssl
 import threading
 import time
 
-from . import gamemgr, ids, messaging, tdf, usersettings
+from . import gamemgr, gmtrace, ids, messaging, tdf, usersettings
 from .config import Config
 from .qos import QOS_PORT
 from .server import Capture, negotiate
@@ -178,29 +178,56 @@ def _send_frame(name: str, frame: bytes, cap: Capture, label: str) -> bool:
         return False
 
 
-FINALIZE_WATCHDOG_SECONDS = 12.0
+FINALIZE_WATCHDOG_SECONDS = 14.0
 
 
 def _start_finalize_watchdog(cfg: Config, cap: Capture, gid: int, host: str) -> None:
-    """Po createGame sprawdza po chwili, czy host wyslal finalizeGameCreation. Jesli nie: poziom drabinki
-    (gamemgr.LEVELS) jest uznany za nieudany i -- gdy gm_watchdog_remove -- gra jest usuwana, zeby host mogl ponowic."""
+    """Po createGame pilnuje hosta: (1) gdy host nie reaguje, po 3/6/9 s wypycha sondy (gamemgr.PROBE_SCHEDULE) i loguje,
+    co go ruszylo; (2) jesli po FINALIZE_WATCHDOG_SECONDS nie ma finalizeGameCreation, poziom drabinki (gamemgr.LEVELS)
+    jest uznany za nieudany i -- gdy gm_watchdog_remove -- gra jest usuwana, zeby host mogl ponowic."""
+    def safe_note(text: str) -> None:
+        try:
+            cap.note(text)
+        except Exception:                      # polaczenie hosta moglo juz zostac zamkniete
+            pass
+        gmtrace.note(text)
+
     def run():
-        time.sleep(FINALIZE_WATCHDOG_SECONDS)
+        start = time.monotonic()
+
+        def sleep_until(offset: float) -> None:
+            delay = start + offset - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+
+        if getattr(cfg, "gm_probes", True):
+            for at, n in gamemgr.PROBE_SCHEDULE:
+                sleep_until(at)
+                if gamemgr.attempt_info(gid) is None or gamemgr.host_reacted(gid):
+                    break
+                outs = gamemgr.probe_frames(cfg, gid, n, _lookup_player)
+                for target, label, frame in outs:
+                    safe_note(f"-> {label} ({at:.0f} s po createGame, klient hosta milczy)")
+                    gmtrace.server(target, label, frame)
+                    _send_frame(target, frame, cap, label)
+        sleep_until(FINALIZE_WATCHDOG_SECONDS)
         info = gamemgr.attempt_info(gid)
         if info is None:
             return
-        try:
-            if info[2]:
-                cap.note(f"-> WATCHDOG: {host!r} GID={gid} poziom {info[0]} ({info[1]}): finalizeGameCreation OK")
-                return
-            outs = gamemgr.watchdog_expired(cfg, gid)
-            cap.note(f"-> WATCHDOG: {host!r} GID={gid} poziom {info[0]} ({info[1]}): po "
-                     f"{FINALIZE_WATCHDOG_SECONDS:.0f} s BRAK finalizeGameCreation -- klient hosta stoi; poziom "
-                     f"uznany za nieudany" + ("; usuwam gre (host moze ponowic bez restartu)" if outs else ""))
-            for target, label, frame in outs:
-                _send_frame(target, frame, cap, label)
-        except Exception:                      # polaczenie hosta moglo juz zostac zamkniete
-            pass
+        if info[2]:
+            safe_note(f"-> WATCHDOG: {host!r} GID={gid} poziom {info[0]} ({info[1]}): finalizeGameCreation OK")
+            return
+        reacted = gamemgr.host_reacted(gid)
+        outs = gamemgr.watchdog_expired(cfg, gid)
+        text = (f"po {FINALIZE_WATCHDOG_SECONDS:.0f} s BRAK finalizeGameCreation (host "
+                f"{'wyslal updateMeshConnection, ale nie finalize' if reacted else 'nie wyslal nic w odpowiedzi na setup'})"
+                f"; poziom {info[0]} ({info[1]}) uznany za nieudany"
+                + ("; usuwam gre (host moze ponowic bez restartu)" if outs else ""))
+        safe_note(f"-> WATCHDOG: {host!r} GID={gid}: {text}")
+        gmtrace.outcome(gid, "PORAZKA -- " + text)
+        for target, label, frame in outs:
+            gmtrace.server(target, label, frame)
+            _send_frame(target, frame, cap, label)
     threading.Thread(target=run, name=f"finalize-watchdog-{gid}", daemon=True).start()
 
 
@@ -963,6 +990,8 @@ def handle(conn: socket.socket, addr, cfg: Config, ctx: ssl.SSLContext) -> None:
                         cap.note(f"UWAGA: TDF decode niekompletny ({reached}/{payload_size}): {err}")
                 except Exception as exc:
                     cap.note(f"TDF decode wyjatek: {exc}")
+                gmtrace.client(identity[0] if identity else f"({addr[0]}:{addr[1]})", component, command,
+                               msg_num, msg_type, fields)
 
                 resp = None
                 pre_extras = []    # ramki wysylane PRZED odpowiedzia (np. UserAdded przed wynikiem lookup)
@@ -1202,11 +1231,19 @@ def handle(conn: socket.socket, addr, cfg: Config, ctx: ssl.SSLContext) -> None:
                                 g = gamemgr.GAMES.get(gid, {})
                                 cap.note(f"-> POZIOM {info[0]} ({info[1]}): {g.get('variant_about')}; "
                                          f"powod wyboru: {g.get('variant_why')}")
+                                gmtrace.configure(cfg.log_dir_path.parent / "gm_attempts.log")
+                                gmtrace.begin(me, gid, info[0], info[1], g.get("variant_why"),
+                                              g.get("variant_about"), fields)
                             _start_finalize_watchdog(cfg, cap, gid, me)
                     elif command == gamemgr.CMD_FINALIZE_GAME_CREATION:
                         resp = build_reply(component, command, msg_num, b"")
                         outs = gamemgr.finalize_game(cfg, me, fields, _lookup_player)
                         info = gamemgr.attempt_info(_find_field(fields, "GID") or 0)
+                        if info is not None and info[2]:
+                            probe = gamemgr.last_probe(_find_field(fields, "GID") or 0)
+                            gmtrace.outcome(_find_field(fields, "GID") or 0,
+                                            f"SUKCES poziomu {info[0]} ({info[1]}): host wyslal finalizeGameCreation"
+                                            + (f" (po sondzie {probe})" if probe else " (bez sond)"))
                         cap.note(f"-> finalizeGameCreation od {me!r} GID={_find_field(fields, 'GID')}: "
                                  f"{len(outs)} powiadomien"
                                  + (f" -- SUKCES poziomu {info[0]} ({info[1]}): klient hosta doszedl do konca "
@@ -1243,6 +1280,10 @@ def handle(conn: socket.socket, addr, cfg: Config, ctx: ssl.SSLContext) -> None:
                     else:
                         resp = build_reply(component, command, msg_num, b"")
                         cap.note(f"-> NIEOBSLUZONE zadanie GameManager 0x{command:04X}: pusta odpowiedz (msg_num={msg_num})")
+                    if resp is not None:
+                        gmtrace.server(me, f"odpowiedz (Reply) na komende 0x{command:04X}", resp)
+                    for target, label, frame in outs:
+                        gmtrace.server(target, label, frame)
                     for target, label, frame in outs:
                         if target == me:
                             extras.append((label, frame))

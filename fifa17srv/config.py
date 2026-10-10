@@ -49,6 +49,9 @@ class Config:
     # Po FINALIZE_WATCHDOG_SECONDS bez finalizeGameCreation hosta serwer usuwa gre (NotifyGameRemoved), zeby klient
     # wrocil z "please wait" i mozna bylo od razu ponowic (bez restartu RPCS3); kolejny createGame uzyje wlasciwego poziomu.
     gm_watchdog_remove: bool = True
+    # Sondy diagnostyczne (gamemgr.PROBE_SCHEDULE): gdy host nie reaguje na setup, po 3/6/9 s serwer wypycha kolejne
+    # powiadomienia (PlatformHostInitialized, stan gracza + JoinCompleted, GameStateChange) i loguje, co ruszylo klienta.
+    gm_probes: bool = True
     # Stan dolaczajacego gracza po NotifyGameSetup: 2 = ACTIVE_CONNECTING (klient laczy sie z hostem P2P).
     gm_initial_player_state: int = 2
     # NotifyPlayerJoining dla hosta o dolaczajacym graczu.

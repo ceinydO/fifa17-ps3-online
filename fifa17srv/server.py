@@ -8,6 +8,7 @@ import socket
 import ssl
 import threading
 import time
+import weakref
 from typing import Callable, Optional
 
 from .config import Config
@@ -20,6 +21,28 @@ log = logging.getLogger("fifa17srv")
 class Capture:
     """One capture per connection: a human-readable .txt log and the raw client bytes as .bin."""
 
+    _open: "weakref.WeakSet" = weakref.WeakSet()
+    _flusher_started = False
+
+    @classmethod
+    def _start_flusher(cls) -> None:
+        """Co 2 s zrzuca bufory otwartych przechwytow na dysk (bez flush przy kazdej linii -- patrz note()), zeby po
+        nagłym zamknieciu okna/serwera pliki nie byly urwane."""
+        if cls._flusher_started:
+            return
+        cls._flusher_started = True
+
+        def run():
+            while True:
+                time.sleep(2.0)
+                for cap in list(cls._open):
+                    try:
+                        cap._txt.flush()
+                        cap._bin.flush()
+                    except Exception:
+                        pass
+        threading.Thread(target=run, name="capture-flusher", daemon=True).start()
+
     def __init__(self, cfg: Config, tag: str, peer):
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         d = cfg.log_dir_path
@@ -30,6 +53,8 @@ class Capture:
         self._bin = open(f"{self.base}_c2s.bin", "wb")
         self.txt_path = f"{self.base}.txt"
         self.bin_path = f"{self.base}_c2s.bin"
+        Capture._open.add(self)
+        Capture._start_flusher()
 
     def note(self, msg: str) -> None:
         # NOTE: no flush() here on purpose. Flushing on every single log line forces a

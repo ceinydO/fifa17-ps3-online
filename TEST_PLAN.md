@@ -49,6 +49,18 @@ Cel: znalezc najnowszy ksztalt pierwszego setupu, po ktorym klient hosta dochodz
 3. Po sukcesie ekran hosta wroci do poprzedniego widoku (jak dawniej) -- zrob zaproszenie JESZCZE RAZ: serwer
    sprobuje poziom wyzej. Po porazce (watchdog usuwa gre) tez po prostu ponow; serwer wroci do dzialajacego poziomu.
    Jesli ekran hosta nie wroci po watchdogu, zamknij tylko emulator hosta (serwer zostaje) i ponow.
-4. Powtarzaj, az poziom 6 przejdzie albo zobaczysz, od ktorego poziomu przestaje dzialac. Przeslij: caly log serwera,
-   `state/gm_variant.json`, `RPCS3.log` obu stron (zwlaszcza po poziomie 6: `sceNpBasicSendMessageGui` u hosta).
+4. Powtarzaj, az poziom 6 przejdzie albo zobaczysz, od ktorego poziomu przestaje dzialac.
+5. Po tescie (serwer moze dzialac dalej): `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` -- tworzy
+   `fifa17_logs_<data>.zip` (logi sesji serwera, `gm_attempts.log`, przechwyty polaczen z 3 godzin, `state\gm_variant.json`,
+   `config.json`). Wyslij ten zip + `RPCS3.log` hosta i kolegi (RPCS3.log trzeba skopiowac zaraz po tescie, zanim
+   emulator nadpisze go przy nastepnym uruchomieniu).
+
+### Co serwer zapisuje sam (`logs/`)
+- `session_<data>.log` -- caly log konsoli (nie trzeba nic wklejac z terminala); na poczatku wersja kodu i config.
+- `gm_attempts.log` -- dziennik prob: dla kazdego createGame poziom i powod wyboru, zadanie createGame, KAZDE powiadomienie
+  GameManager wyslane przez serwer (rozkodowane), KAZDE zadanie klientow w ciagu 45 s (z czasem w ms od createGame)
+  i wynik (`SUKCES poziomu n (po sondzie k)` albo `PORAZKA`, plus zestawienie zadan od kazdego gracza).
+- Sondy: gdy host milczy po setupie, po 3/6/9 s serwer wypycha kolejne powiadomienia (PlatformHostInitialized; stan
+  gracza CONNECTED + JoinCompleted; GameStateChange) i loguje, po ktorej sondzie klient ruszyl. Wylaczenie:
+  `"gm_probes": false`.
 Wymuszenie poziomu: `"gm_variant": 4` w `config.json` (1-6); `-1` = pojedyncze przelaczniki `gm_*`.

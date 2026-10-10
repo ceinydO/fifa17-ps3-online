@@ -222,6 +222,44 @@ def watchdog_expired(cfg, gid: int):
         return outs
 
 
+# Sondy: jesli klient hosta nie reaguje na setup (ani updateMeshConnection, ani finalizeGameCreation), serwer po kolei
+# (co kilka sekund) wypycha powiadomienia, na ktore klient moze czekac, i loguje, ktore z nich go ruszylo.
+PROBE_SCHEDULE = ((3.0, 1), (6.0, 2), (9.0, 3))
+
+
+def host_reacted(gid: int) -> bool:
+    with GAMES_LOCK:
+        game = GAMES.get(gid)
+        return game is None or bool(game.get("finalized") or game.get("mesh_seen"))
+
+
+def last_probe(gid: int):
+    with GAMES_LOCK:
+        game = GAMES.get(gid)
+        return game.get("last_probe") if game else None
+
+
+def probe_frames(cfg, gid: int, n: int, lookup) -> list:
+    """Sonda n (1..3) dla hosta gry `gid`; pusta lista, gdy gra zniknela albo host juz zareagowal."""
+    with GAMES_LOCK:
+        game = GAMES.get(gid)
+        if game is None or game.get("finalized") or game.get("mesh_seen"):
+            return []
+        host = game["host"]
+        info = _snapshot(lookup, [host])[host]
+        game["last_probe"] = n
+        if n == 1:
+            return [(host, "SONDA 1: NotifyPlatformHostInitialized",
+                     notify_platform_host_initialized(gid, info["uid"]))]
+        if n == 2:
+            game["pstate"][host] = PLAYER_CONNECTED
+            return [(host, "SONDA 2: NotifyGamePlayerStateChange CONNECTED",
+                     notify_player_state_change(gid, info["uid"], PLAYER_CONNECTED)),
+                    (host, "SONDA 2: NotifyPlayerJoinCompleted", notify_player_join_completed(gid, info["uid"]))]
+        return [(host, f"SONDA 3: NotifyGameStateChange PRE_GAME (stan gry u serwera: {game['state']})",
+                 notify_game_state_change(gid, STATE_PRE_GAME))]
+
+
 def attempt_info(gid: int):
     """(numer wariantu, nazwa, czy host dotarl do finalizeGameCreation) lub None gdy gry nie ma."""
     with GAMES_LOCK:
@@ -658,6 +696,8 @@ def update_mesh_connection(cfg, name: str, req_fields, lookup) -> list:
     tcg = _field(req_fields, "TCG", (0, 0, 0)) or (0, 0, 0)
     with GAMES_LOCK:
         game = GAMES.get(gid)
+        if game is not None and name == game["host"]:
+            game["mesh_seen"] = True              # klient hosta ruszyl (nawet jesli to jeszcze nie finalize)
         if game is None or name not in game["players"] or stat != 2:
             return []
         target = _find_by_uid(game, tcg[2]) if len(tcg) > 2 else None
