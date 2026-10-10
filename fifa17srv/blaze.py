@@ -178,12 +178,12 @@ def _send_frame(name: str, frame: bytes, cap: Capture, label: str) -> bool:
         return False
 
 
-FINALIZE_WATCHDOG_SECONDS = 10.0
+FINALIZE_WATCHDOG_SECONDS = 12.0
 
 
-def _start_finalize_watchdog(cap: Capture, gid: int, host: str) -> None:
-    """Po createGame sprawdza po chwili, czy host wyslal finalizeGameCreation; wynik tylko do logu (diagnostyka
-    wariantow z gamemgr.VARIANTS -- bez tego trzeba by czytac caly log, zeby zauwazyc, ze klient stanal)."""
+def _start_finalize_watchdog(cfg: Config, cap: Capture, gid: int, host: str) -> None:
+    """Po createGame sprawdza po chwili, czy host wyslal finalizeGameCreation. Jesli nie: poziom drabinki
+    (gamemgr.LEVELS) jest uznany za nieudany i -- gdy gm_watchdog_remove -- gra jest usuwana, zeby host mogl ponowic."""
     def run():
         time.sleep(FINALIZE_WATCHDOG_SECONDS)
         info = gamemgr.attempt_info(gid)
@@ -191,12 +191,15 @@ def _start_finalize_watchdog(cap: Capture, gid: int, host: str) -> None:
             return
         try:
             if info[2]:
-                cap.note(f"-> WATCHDOG: {host!r} GID={gid} wariant {info[0]} ({info[1]}): finalizeGameCreation OK")
-            else:
-                cap.note(f"-> WATCHDOG: {host!r} GID={gid} wariant {info[0]} ({info[1]}): po "
-                         f"{FINALIZE_WATCHDOG_SECONDS:.0f} s BRAK finalizeGameCreation -- klient hosta stoi; "
-                         f"kolejny createGame uzyje nastepnego wariantu (tryb auto)")
-        except Exception:                      # polaczenie hosta mogło juz zostac zamkniete
+                cap.note(f"-> WATCHDOG: {host!r} GID={gid} poziom {info[0]} ({info[1]}): finalizeGameCreation OK")
+                return
+            outs = gamemgr.watchdog_expired(cfg, gid)
+            cap.note(f"-> WATCHDOG: {host!r} GID={gid} poziom {info[0]} ({info[1]}): po "
+                     f"{FINALIZE_WATCHDOG_SECONDS:.0f} s BRAK finalizeGameCreation -- klient hosta stoi; poziom "
+                     f"uznany za nieudany" + ("; usuwam gre (host moze ponowic bez restartu)" if outs else ""))
+            for target, label, frame in outs:
+                _send_frame(target, frame, cap, label)
+        except Exception:                      # polaczenie hosta moglo juz zostac zamkniete
             pass
     threading.Thread(target=run, name=f"finalize-watchdog-{gid}", daemon=True).start()
 
@@ -1197,16 +1200,16 @@ def handle(conn: socket.socket, addr, cfg: Config, ctx: ssl.SSLContext) -> None:
                         if info is not None:
                             with gamemgr.GAMES_LOCK:
                                 g = gamemgr.GAMES.get(gid, {})
-                                cap.note(f"-> WARIANT {info[0]} ({info[1]}): {g.get('variant_about')}; "
+                                cap.note(f"-> POZIOM {info[0]} ({info[1]}): {g.get('variant_about')}; "
                                          f"powod wyboru: {g.get('variant_why')}")
-                            _start_finalize_watchdog(cap, gid, me)
+                            _start_finalize_watchdog(cfg, cap, gid, me)
                     elif command == gamemgr.CMD_FINALIZE_GAME_CREATION:
                         resp = build_reply(component, command, msg_num, b"")
                         outs = gamemgr.finalize_game(cfg, me, fields, _lookup_player)
                         info = gamemgr.attempt_info(_find_field(fields, "GID") or 0)
                         cap.note(f"-> finalizeGameCreation od {me!r} GID={_find_field(fields, 'GID')}: "
                                  f"{len(outs)} powiadomien"
-                                 + (f" -- SUKCES wariantu {info[0]} ({info[1]}): klient hosta doszedl do konca "
+                                 + (f" -- SUKCES poziomu {info[0]} ({info[1]}): klient hosta doszedl do konca "
                                     f"tworzenia sieci gry" if info is not None and info[2] else ""))
                     elif command == gamemgr.CMD_UPDATE_MESH_CONNECTION:
                         resp = build_reply(component, command, msg_num, b"")

@@ -45,15 +45,30 @@ game itself.
   jego wlasne. FIFA pobiera je z innego kontenera uzytkownikow niz lista graczy lokalnych (hipoteza: pierwszy/min id).
   Nie wplywa na GameManager (tam porownanie idzie po liscie lokalnych), ale warto pamietac przy FUT/POW.
 
-**Zmiana w serwerze (niezweryfikowana, kolejny test):** warianty pierwszego `NotifyGameSetup` hosta
-(`gamemgr.VARIANTS`, przelacznik `gm_variant`, domyslnie 0 = auto):
-1. `init-connected`: INITIALIZING + host STAT=4, zaproszony po finalize (domyslny start);
-2. `pregame-connected`: PRE_GAME + host STAT=4 + follow-upy `GamePlayerStateChange`/`GameStateChange`;
-3. `legacy-both`: jak stary przebieg (PRE_GAME, pelny roster od razu, REAS nieustawiona, follow-upy);
-4. `init-connecting`: wariant z testu, po ktorym host stanal (tylko do porownan, `gm_variant=4`).
-Tryb auto: jesli poprzednia proba hosta NIE doszla do `finalizeGameCreation`, kolejny `createGame` uzywa
-nastepnego wariantu (1->2->3->1), a wariant, ktory doszedl, zostaje; stan w `state/gm_variant.json`. W logu serwera:
-linia `WARIANT n (nazwa)` po `createGame` i `WATCHDOG` po 10 s (OK / brak finalize). Selftest 37/37.
+**Test 2026-10-10 (logi RPCS3 hosta i kolegi, bez logu serwera):** nadal brak polaczenia. W logu hosta jest jedna
+para `bind` UDP 3659/9999 (jedno `createGame`), potem nic -- zadnego `sceNpBasicSendMessageGui`; u kolegi nie bylo
+bindu 9999, wiec nie dostal zadnego setupu (zaproszony dostaje setup dopiero po `finalizeGameCreation` hosta).
+`NPHandler: basic_event: event:0` to u RPCS3 OFFLINE znajomego (1 = presence, 5 = zaproszenie), nie wiadomosc.
+Logi RPCS3 hosta ze starego (2026-10-08) i nowego przebiegu sa prawie identyczne -- rozstrzyga tylko log serwera.
+**Z archiwalnego logu serwera (stary przebieg, 2026-10-08 22:02 UTC):** po setupie host wysylal OD RAZU
+`updateMeshConnection` (STAT=2, TCG=(30722,2,0)) i `finalizeGameCreation`, potem FE robil lookup kolegi i statystyki
+`MyFriendlies` i wracal do poprzedniego ekranu bez zaproszenia (czyli createGame konczyl sie sukcesem).
+
+**Zmiana w serwerze (niezweryfikowana na zywo): drabinka poziomow pierwszego `NotifyGameSetup`** (`gamemgr.LEVELS`,
+`gm_variant`, domyslnie 0 = auto):
+1. `1-stary-ksztalt` -- BAJT W BAJT jak stary przebieg (zweryfikowane diffem po zamaskowaniu id): PRE_GAME, obaj gracze
+   od razu w setupie (STAT=4), stare pola graczy i gry, REAS z tagiem VALU (unia pusta), follow-upy 0x74 x2 + 0x64;
+2. `+nowi-gracze` -- nowe pola rostera (CONG, CSID, DSUI, EXBL, LOC, NASP, PATT, TIME, UUID) i NotifyUserAdded;
+3. `+nowa-gra` -- GPVH, SEED, UUID, MNCP, PSAS, pelny HostInfo, MACI w adresach;
+4. `+nowy-REAS` -- host DLSC/CREATE, zaproszony IJGS;
+5. `+zaproszony-po-finalize` -- host sam w pierwszym setupie;
+6. `6-initializing` -- INITIALIZING + brak follow-upow (docelowy; tylko on daje 'gses' potrzebne do zaproszenia).
+Tryb auto: poziom 1 na start; kazdy `createGame`, ktory doszedl do `finalizeGameCreation` hosta, zwieksza poziom przy
+nastepnej probie; porazka (watchdog 12 s) cofa do najnowszego dzialajacego i usuwa gre (`NotifyGameRemoved`,
+`gm_watchdog_remove`), zeby host mogl ponowic bez restartu. Stan: `state/gm_variant.json`. W logu serwera:
+`POZIOM n`, `WATCHDOG ...`, `SUKCES poziomu n`. Dodatkowo identyfikatory graczy sa teraz < 2^31
+(`ids.uid_for`: 1.1e9..2.0e9) -- host `odyniec` mial wczesniej uid 2 999 187 369, a stary dzialajacy przebieg uzywal
+tylko wartosci < 2^31. Selftest 40/40.
 
 ## Latest session: 2026-10-09 (analiza dekompilatorem, przebudowa GameManager)
 

@@ -38,13 +38,17 @@ class Config:
     # Test na zywo 2026-10-09: z wartoscia 2 (i INITIALIZING) host po NotifyGameSetup zbindowal UDP 3659/9999,
     # ale NIE wyslal ani updateMeshConnection, ani finalizeGameCreation -- stary przebieg (PRE_GAME + host 4) wysylal.
     gm_host_initial_state: int = 4
-    # Wariant pierwszego NotifyGameSetup dla hosta (patrz gamemgr.VARIANTS):
-    #   0  = automatycznie: zaczyna od wariantu 1; jesli poprzednia proba hosta NIE doszla do finalizeGameCreation,
-    #        kolejny createGame uzywa nastepnego wariantu (1 -> 2 -> 3 -> 1 ...); jesli doszla, wariant zostaje.
-    #        Stan trzymany w state/gm_variant.json (przetrwa restart serwera).
-    #   1..4 = wymuszony wariant, -1 = uzyj pojedynczych przelacznikow gm_deferred_pregame/gm_faithful_flow/
+    # Poziom ksztaltu pierwszego NotifyGameSetup dla hosta (patrz gamemgr.LEVELS; 1 = bajt w bajt jak stary,
+    # dzialajacy przebieg ... 6 = docelowy z INITIALIZING):
+    #   0  = automatycznie (drabinka): start od 1; po kazdym createGame, ktory doszedl do finalizeGameCreation hosta,
+    #        nastepny createGame probuje poziom wyzej; po porazce wraca do najnowszego dzialajacego. Stan w
+    #        state/gm_variant.json (przetrwa restart serwera; skasuj plik, zeby zaczac od nowa).
+    #   1..6 = wymuszony poziom, -1 = uzyj pojedynczych przelacznikow gm_deferred_pregame/gm_faithful_flow/
     #        gm_host_initial_state z tego pliku.
     gm_variant: int = 0
+    # Po FINALIZE_WATCHDOG_SECONDS bez finalizeGameCreation hosta serwer usuwa gre (NotifyGameRemoved), zeby klient
+    # wrocil z "please wait" i mozna bylo od razu ponowic (bez restartu RPCS3); kolejny createGame uzyje wlasciwego poziomu.
+    gm_watchdog_remove: bool = True
     # Stan dolaczajacego gracza po NotifyGameSetup: 2 = ACTIVE_CONNECTING (klient laczy sie z hostem P2P).
     gm_initial_player_state: int = 2
     # NotifyPlayerJoining dla hosta o dolaczajacym graczu.

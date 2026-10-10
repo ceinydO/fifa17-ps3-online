@@ -19,7 +19,9 @@ CONNECTION_GROUP_TYPE = (30722, 2)
 def uid_for(name: str) -> int:
     """BlazeId (== UserIdentification.ID == UID == numer sesji uzytkownika) persony o danej nazwie."""
     h = int(hashlib.sha1(name.encode("utf-8")).hexdigest(), 16)
-    return 2000000000 + (h % 1000000000)
+    # Zakres [1.1e9, 2.0e9): zawsze < 2^31 i rozny od dawnego LOCAL_USER_ID (1000000001). Dzialajacy stary
+    # przebieg uzywal tylko takich wartosci; poprzedni zakres 2e9..3e9 dawal host-owi `odyniec` id > 2^31.
+    return 1100000000 + (h % 900000000)
 
 
 def persona_id_for(name: str) -> int:

@@ -79,28 +79,37 @@ Out = tuple  # (nazwa_gracza, opis, ramka)
 # szukanie uzytkownika po BlazeId zwraca NULL (patrz historia crasha lookupUsersByPersonaNames).
 USER_ADDED_BUILDER = None
 
-# ------------------------------------------------------------------------------------------------ warianty
-# Wariant = ksztalt PIERWSZEGO NotifyGameSetup dla hosta. Test na zywo 2026-10-09 pokazal, ze po przebudowie
-# (INITIALIZING + host ACTIVE_CONNECTING) klient hosta po NotifyGameSetup binduje UDP 3659/9999, ale nie wysyla
-# ani updateMeshConnection, ani finalizeGameCreation, podczas gdy stary przebieg (PRE_GAME, host ACTIVE_CONNECTED,
-# do tego GamePlayerStateChange + GameStateChange) wysylal oba. Dekompilacja (handler NotifyGameSetup 0xc6e0b8,
-# callback sieci 0xc6a92c -> 0xc6a4e0 -> finalizeGameCreation 0xc6a204) nie rozstrzyga, ktora roznica wstrzymuje
-# lancuch, wiec serwer potrafi wyprobowac kolejne warianty (przelacznik gm_variant w config.py).
-VARIANTS = {
-    1: {"name": "init-connected", "state": STATE_INITIALIZING, "host_state": PLAYER_CONNECTED,
-        "invitee_in_setup": False, "followups": False, "reason_unset": False,
-        "about": "INITIALIZING + host ACTIVE_CONNECTED, zaproszony dopiero po finalizeGameCreation"},
-    2: {"name": "pregame-connected", "state": STATE_PRE_GAME, "host_state": PLAYER_CONNECTED,
-        "invitee_in_setup": False, "followups": True, "reason_unset": False,
-        "about": "PRE_GAME + host ACTIVE_CONNECTED + GamePlayerStateChange/GameStateChange, zaproszony po finalize"},
-    3: {"name": "legacy-both", "state": STATE_PRE_GAME, "host_state": PLAYER_CONNECTED,
-        "invitee_in_setup": True, "followups": True, "reason_unset": True,
-        "about": "jak stary przebieg: PRE_GAME, obaj gracze od razu w setupie, REAS nieustawiona, follow-upy"},
-    4: {"name": "init-connecting", "state": STATE_INITIALIZING, "host_state": PLAYER_CONNECTING,
-        "invitee_in_setup": False, "followups": False, "reason_unset": False,
-        "about": "wariant z testu 2026-10-09, po ktorym host sie zatrzymal (do porownan)"},
+# ------------------------------------------------------------------------------------------------ poziomy
+# Test na zywo 2026-10-09/10 pokazal: po przebudowie GameManager klient hosta NIE wysyla ani updateMeshConnection,
+# ani finalizeGameCreation (ostatni test na zywo ze starym przebiegiem, commit 2c9842c: wysylal oba od razu po
+# setupie, a potem szedl dalej -- lookup kolegi, statystyki). Dekompilacja (handler NotifyGameSetup 0xc6e0b8,
+# onNetworkCreated 0xc6a92c -> 0xc6a4e0 -> finalize 0xc6a204) nie wskazuje jednej przyczyny, wiec serwer potrafi
+# wejsc po "drabince" od kształtu BAJT W BAJT jak stary (poziom 1) do obecnego docelowego (poziom 6), dodajac
+# po jednej zmianie na poziom. Tryb auto (gm_variant=0): kolejny createGame probuje nowszy poziom, jesli
+# poprzedni doszedl do finalizeGameCreation hosta; po porazce wraca do najnowszego dzialajacego.
+LEVELS = {
+    1: {"name": "1-stary-ksztalt", "state": STATE_PRE_GAME, "host_state": PLAYER_CONNECTED,
+        "invitee_in_setup": True, "followups": True, "reason": "legacy", "new_players": False, "new_game": False,
+        "user_added": False,
+        "about": "bajt w bajt jak stary przebieg: PRE_GAME, obaj gracze w setupie, stare pola, REAS z tagiem FIFA 14"},
+    2: {"name": "2-nowi-gracze", "state": STATE_PRE_GAME, "host_state": PLAYER_CONNECTED,
+        "invitee_in_setup": True, "followups": True, "reason": "legacy", "new_players": True, "new_game": False,
+        "about": "poziom 1 + nowe pola graczy w rosterze (CONG, CSID, DSUI, EXBL, LOC, NASP, PATT, TIME, UUID) "
+                 "+ wzajemne NotifyUserAdded"},
+    3: {"name": "3-nowa-gra", "state": STATE_PRE_GAME, "host_state": PLAYER_CONNECTED,
+        "invitee_in_setup": True, "followups": True, "reason": "legacy", "new_players": True, "new_game": True,
+        "about": "poziom 2 + nowe pola gry (GPVH, SEED, UUID, MNCP, PSAS, pelny HostInfo, MACI w adresach)"},
+    4: {"name": "4-nowy-REAS", "state": STATE_PRE_GAME, "host_state": PLAYER_CONNECTED,
+        "invitee_in_setup": True, "followups": True, "reason": "new", "new_players": True, "new_game": True,
+        "about": "poziom 3 + REAS wg FIFA 17 (host DLSC/CREATE, zaproszony IJGS)"},
+    5: {"name": "5-zaproszony-po-finalize", "state": STATE_PRE_GAME, "host_state": PLAYER_CONNECTED,
+        "invitee_in_setup": False, "followups": True, "reason": "new", "new_players": True, "new_game": True,
+        "about": "poziom 4 + host sam w pierwszym setupie, zaproszony dopiero po finalizeGameCreation"},
+    6: {"name": "6-initializing", "state": STATE_INITIALIZING, "host_state": PLAYER_CONNECTED,
+        "invitee_in_setup": False, "followups": False, "reason": "new", "new_players": True, "new_game": True,
+        "about": "poziom 5 + gra startuje w INITIALIZING (PRE_GAME po finalize), bez follow-upow -- docelowy"},
 }
-AUTO_ROTATION = (1, 2, 3)
+MAX_LEVEL = max(LEVELS)
 _VARIANT_LOCK = threading.Lock()
 
 
@@ -123,50 +132,94 @@ def _write_variant_state(path, data) -> None:
 
 
 def choose_variant(cfg):
-    """Wybiera wariant dla nowego createGame. Zwraca (numer | None, uzasadnienie). None = pojedyncze przelaczniki
-    (gm_variant = -1). Tryb auto (0): pierwszy raz wariant 1; jesli poprzednia proba nie doszla do
-    finalizeGameCreation -- nastepny z AUTO_ROTATION; jesli doszla -- ten sam."""
+    """Wybiera poziom dla nowego createGame -> (numer | None, uzasadnienie). None = pojedyncze przelaczniki
+    (gm_variant = -1). Auto (0): poziom 1 na start; poprzedni poziom OK -> nastepny wyzszy (o ile nie byl juz
+    nieudany), nie OK -> najnowszy dzialajacy (lub, gdy zaden nie dzialal, kolejny wyzszy). Stan w pliku
+    state/gm_variant.json: {"level", "result": pending|ok|fail, "good": [...], "bad": [...]}."""
     forced = getattr(cfg, "gm_variant", 0)
     if forced < 0:
         return None, "gm_variant=-1: pojedyncze przelaczniki gm_*"
     if forced > 0:
-        number = forced if forced in VARIANTS else AUTO_ROTATION[0]
+        number = forced if forced in LEVELS else MAX_LEVEL
         return number, f"wymuszony w config (gm_variant={forced})"
     path = getattr(cfg, "gm_variant_path", None)
     with _VARIANT_LOCK:
-        state = _read_variant_state(path) if path is not None else None
-        last = state.get("variant") if state else None
-        if last not in AUTO_ROTATION:
-            number, why = AUTO_ROTATION[0], "pierwsza proba"
-        elif state.get("finalized"):
-            number, why = last, f"poprzednia proba (wariant {last}) doszla do finalizeGameCreation -- zostaje"
+        st = (_read_variant_state(path) if path is not None else None) or {}
+        level, result = st.get("level"), st.get("result")
+        good, bad = set(st.get("good", [])), set(st.get("bad", []))
+        if level not in LEVELS:
+            number, why = 1, "pierwsza proba -- zaczynamy od ksztaltu jak stary, dzialajacy przebieg"
         else:
-            number = AUTO_ROTATION[(AUTO_ROTATION.index(last) + 1) % len(AUTO_ROTATION)]
-            why = f"poprzednia proba (wariant {last}) NIE doszla do finalizeGameCreation -- nastepny wariant"
+            if result == "ok":
+                good.add(level)
+                bad.discard(level)
+            else:
+                bad.add(level)
+                good.discard(level)
+            best = max(good) if good else 0
+            if result == "ok":
+                if level + 1 <= MAX_LEVEL and level + 1 not in bad:
+                    number, why = level + 1, f"poziom {level} doszedl do finalizeGameCreation -- probuje nowszy"
+                else:
+                    number, why = best, f"poziom {level} dziala, nowszego brak/nie dziala -- zostaje {best}"
+            elif best:
+                number, why = best, f"poziom {level} NIE doszedl do finalizeGameCreation -- wraca do {best}"
+            else:
+                number = level + 1 if level < MAX_LEVEL else 1
+                why = f"poziom {level} NIE doszedl do finalizeGameCreation, zaden nie dziala -- probuje {number}"
         if path is not None:
-            _write_variant_state(path, {"variant": number, "finalized": False})
+            _write_variant_state(path, {"level": number, "result": "pending",
+                                        "good": sorted(good), "bad": sorted(bad)})
         return number, why
 
 
-def mark_finalized(cfg, number) -> None:
-    """Host wyslal finalizeGameCreation -- ten wariant 'dziala' (kolejny createGame zostanie przy nim)."""
+def _set_result(cfg, number, result: str) -> None:
     path = getattr(cfg, "gm_variant_path", None)
-    if path is None or number not in AUTO_ROTATION:
+    if path is None or number not in LEVELS or getattr(cfg, "gm_variant", 0) != 0:
         return
     with _VARIANT_LOCK:
-        state = _read_variant_state(path)
-        if state and state.get("variant") == number:
-            _write_variant_state(path, {"variant": number, "finalized": True})
+        st = _read_variant_state(path)
+        if st and st.get("level") == number and st.get("result") == "pending":
+            st["result"] = result
+            _write_variant_state(path, st)
+
+
+def mark_finalized(cfg, number) -> None:
+    """Host wyslal finalizeGameCreation -- ten poziom 'dziala'."""
+    _set_result(cfg, number, "ok")
+
+
+def mark_failed(cfg, number) -> None:
+    """Minal czas na finalizeGameCreation hosta -- ten poziom nie dziala."""
+    _set_result(cfg, number, "fail")
 
 
 def effective_settings(cfg, number):
-    """Parametry pierwszego setupu: z wariantu albo z pojedynczych przelacznikow (number=None)."""
+    """Parametry setupu: z poziomu albo z pojedynczych przelacznikow (number=None)."""
     if number is None:
         return {"name": "przelaczniki", "about": "pojedyncze przelaczniki gm_*",
                 "state": STATE_INITIALIZING if cfg.gm_deferred_pregame else STATE_PRE_GAME,
                 "host_state": cfg.gm_host_initial_state, "invitee_in_setup": not cfg.gm_faithful_flow,
-                "followups": False, "reason_unset": False}
-    return dict(VARIANTS.get(number, VARIANTS[AUTO_ROTATION[0]]))
+                "followups": False, "reason": "new", "new_players": True, "new_game": True}
+    return dict(LEVELS.get(number, LEVELS[MAX_LEVEL]))
+
+
+def watchdog_expired(cfg, gid: int):
+    """Host nie wyslal finalizeGameCreation w wyznaczonym czasie: poziom uznany za nieudany; opcjonalnie
+    (gm_watchdog_remove) gra jest usuwana (NotifyGameRemoved), zeby klient wrocil z ekranu "please wait" bez restartu.
+    Zwraca liste Out."""
+    with GAMES_LOCK:
+        game = GAMES.get(gid)
+        if game is None or game.get("finalized"):
+            return []
+        game["failed"] = True
+        mark_failed(cfg, game.get("variant"))
+        if not getattr(cfg, "gm_watchdog_remove", True):
+            return []
+        outs = [(n, "NotifyGameRemoved (watchdog: brak finalizeGameCreation)", notify_game_removed(gid, 0))
+                for n in game["players"]]
+        del GAMES[gid]
+        return outs
 
 
 def attempt_info(gid: int):
@@ -233,16 +286,37 @@ def peer_endpoint(info: dict):
 
 
 # -------------------------------------------------------------------------------------- struktury gry
-def host_info(info: dict):
-    """Blaze::GameManager::HostInfo {CONG, CSID, HPID, HSES, HSLT}."""
+def host_info(info: dict, new: bool = True):
+    """Blaze::GameManager::HostInfo {CONG, CSID, HPID, HSES, HSLT}; stary ksztalt (poziom 1-2): tylko {HPID, HSLT}."""
     uid = info["uid"]
+    if not new:
+        return [("HPID", tdf.VARINT, uid), ("HSLT", tdf.VARINT, 0)]
     return _S([("CONG", tdf.VARINT, ids.connection_group_id_for(info["name"])), ("CSID", tdf.VARINT, 0),
                ("HPID", tdf.VARINT, uid), ("HSES", tdf.VARINT, uid), ("HSLT", tdf.VARINT, 0)])
 
 
-def player_entry(info: dict, gid: int, slot: int, state: int, team_index: int = 0):
-    """Blaze::GameManager::ReplicatedGamePlayer (pola z refleksji EBOOT)."""
+def legacy_network_address(ip: int, port: int):
+    """NetworkAddress jak w starym przebiegu: IpPairAddress {EXIP{IP,PORT}, INIP{IP,PORT}} bez MACI."""
+    ep = [("IP  ", tdf.VARINT, ip), ("PORT", tdf.VARINT, port)]
+    return (2, ("VALU", tdf.STRUCT, [("EXIP", tdf.STRUCT, ep), ("INIP", tdf.STRUCT, ep)]))
+
+
+def player_entry(info: dict, gid: int, slot: int, state: int, team_index: int = 0, new: bool = True):
+    """Blaze::GameManager::ReplicatedGamePlayer (pola z refleksji EBOOT); new=False -> stary, krotszy zestaw pol."""
     ip, port, maci = peer_endpoint(info)
+    if not new:
+        return _S([
+            ("EXID", tdf.VARINT, info["ext"]),
+            ("GID ", tdf.VARINT, gid),
+            ("NAME", tdf.STRING, info["name"]),
+            ("PID ", tdf.VARINT, info["uid"]),
+            ("PNET", tdf.UNION, legacy_network_address(ip, port)),
+            ("SID ", tdf.VARINT, slot),
+            ("SLOT", tdf.VARINT, 0),
+            ("STAT", tdf.VARINT, state),
+            ("TIDX", tdf.VARINT, team_index),
+            ("UID ", tdf.VARINT, info["uid"]),
+        ])
     return _S([
         ("CONG", tdf.VARINT, ids.connection_group_id_for(info["name"])),
         ("CSID", tdf.VARINT, 0),
@@ -267,33 +341,56 @@ def player_entry(info: dict, gid: int, slot: int, state: int, team_index: int = 
 
 
 def game_data(game: dict, host: dict, state: int):
-    """Blaze::GameManager::ReplicatedGameData -- wylacznie pola, ktore istnieja w FIFA 17."""
+    """Blaze::GameManager::ReplicatedGameData -- wylacznie pola, ktore istnieja w FIFA 17 (poziom 1-2: zestaw
+    ze starego przebiegu, razem z nieistniejacym HSES, ktory klient ignoruje)."""
     ip, port, maci = peer_endpoint(host)
     echo = game["echo"]
-    hinfo = host_info(host)
-    fields = [
-        ("ADMN", tdf.LIST, (tdf.VARINT, [host["uid"]])),
-        ("GID ", tdf.VARINT, game["id"]),
-        ("GNAM", tdf.STRING, game["name"]),
-        ("GPVH", tdf.VARINT, game["proto_hash"]),
-        ("GSET", tdf.VARINT, echo.get("GSET", 0)),
-        ("GSTA", tdf.VARINT, state),
-        ("GTYP", tdf.STRING, echo.get("GTYP", "gameType0")),
-        ("HNET", tdf.LIST, (tdf.UNION, [network_address(ip, port, maci)])),
-        ("MCAP", tdf.VARINT, game["max_players"]),
-        ("MNCP", tdf.VARINT, game["min_players"]),
-        ("NRES", tdf.VARINT, 0),
-        ("NTOP", tdf.VARINT, game["topology"]),
-        ("PHST", tdf.STRUCT, hinfo),
-        ("PRES", tdf.VARINT, echo.get("PRES", 1)),
-        ("PSAS", tdf.STRING, DEFAULT_PING_SITE),
-        ("QCAP", tdf.VARINT, echo.get("QCAP", 0)),
-        ("SEED", tdf.VARINT, game["seed"]),
-        ("THST", tdf.STRUCT, hinfo),
-        ("UUID", tdf.STRING, game["uuid"]),
-        ("VOIP", tdf.VARINT, echo.get("VOIP", 2)),
-        ("VSTR", tdf.STRING, game["version"]),
-    ]
+    new = game.get("shape", {}).get("new_game", True)
+    hinfo = host_info(host, new)
+    if new:
+        fields = [
+            ("ADMN", tdf.LIST, (tdf.VARINT, [host["uid"]])),
+            ("GID ", tdf.VARINT, game["id"]),
+            ("GNAM", tdf.STRING, game["name"]),
+            ("GPVH", tdf.VARINT, game["proto_hash"]),
+            ("GSET", tdf.VARINT, echo.get("GSET", 0)),
+            ("GSTA", tdf.VARINT, state),
+            ("GTYP", tdf.STRING, echo.get("GTYP", "gameType0")),
+            ("HNET", tdf.LIST, (tdf.UNION, [network_address(ip, port, maci)])),
+            ("MCAP", tdf.VARINT, game["max_players"]),
+            ("MNCP", tdf.VARINT, game["min_players"]),
+            ("NRES", tdf.VARINT, 0),
+            ("NTOP", tdf.VARINT, game["topology"]),
+            ("PHST", tdf.STRUCT, hinfo),
+            ("PRES", tdf.VARINT, echo.get("PRES", 1)),
+            ("PSAS", tdf.STRING, DEFAULT_PING_SITE),
+            ("QCAP", tdf.VARINT, echo.get("QCAP", 0)),
+            ("SEED", tdf.VARINT, game["seed"]),
+            ("THST", tdf.STRUCT, hinfo),
+            ("UUID", tdf.STRING, game["uuid"]),
+            ("VOIP", tdf.VARINT, echo.get("VOIP", 2)),
+            ("VSTR", tdf.STRING, game["version"]),
+        ]
+    else:
+        fields = [
+            ("ADMN", tdf.LIST, (tdf.VARINT, [host["uid"]])),
+            ("GID ", tdf.VARINT, game["id"]),
+            ("GNAM", tdf.STRING, game["name"]),
+            ("GSET", tdf.VARINT, echo.get("GSET", 0)),
+            ("GSTA", tdf.VARINT, state),
+            ("GTYP", tdf.STRING, echo.get("GTYP", "gameType0")),
+            ("HNET", tdf.LIST, (tdf.UNION, [legacy_network_address(ip, port)])),
+            ("HSES", tdf.VARINT, host["uid"]),
+            ("MCAP", tdf.VARINT, game["max_players"]),
+            ("NRES", tdf.VARINT, 0),
+            ("NTOP", tdf.VARINT, game["topology"]),
+            ("PHST", tdf.STRUCT, hinfo),
+            ("PRES", tdf.VARINT, echo.get("PRES", 1)),
+            ("QCAP", tdf.VARINT, echo.get("QCAP", 0)),
+            ("THST", tdf.STRUCT, hinfo),
+            ("VOIP", tdf.VARINT, echo.get("VOIP", 2)),
+            ("VSTR", tdf.STRING, game["version"]),
+        ]
     if echo.get("ATTR") is not None:
         fields.append(("ATTR", tdf.MAP, echo["ATTR"]))
     if echo.get("CRIT") is not None:
@@ -321,10 +418,17 @@ def setup_reason_indirect_join(cfg):
     return (2, ("VALU", tdf.STRUCT, []))      # stary ksztalt FIFA 14 (numer 2 to w FIFA 17 IndirectMatchmaking!)
 
 
+def setup_reason_legacy(disc: int):
+    """Stary ksztalt REAS (FIFA 14): skladowa o tagu VALU -- w FIFA 17 tag nie pasuje, wiec klient zostawia unie
+    pusta. disc 0 = host (create), 2 = zaproszony (w FIFA 17 to IMSC)."""
+    return (disc, ("VALU", tdf.STRUCT, []))
+
+
 def notify_game_setup(game: dict, players: dict, names, reason, state: int) -> bytes:
     """NotifyGameSetup {GAME, PROS, QUEU, REAS} dla listy `names` w kolejnosci slotow."""
     host = players[game["host"]]
-    roster = [player_entry(players[n], game["id"], slot, game["pstate"][n], min(slot, 1))
+    newp = game.get("shape", {}).get("new_players", True)
+    roster = [player_entry(players[n], game["id"], slot, game["pstate"][n], min(slot, 1), newp)
               for slot, n in enumerate(names)]
     return notification(N_GAME_SETUP, [
         ("GAME", tdf.STRUCT, game_data(game, host, state)),
@@ -411,8 +515,8 @@ def _snapshot(lookup, names):
 
 # ------------------------------------------------------------------------------------------- createGame
 def create_game(cfg, host: str, req_fields, others, lookup):
-    """Obsluga GameManager::createGame. Zwraca (gid, pola_odpowiedzi, [Out...]); w grze zostaje zapisany
-    wariant ("variant", "variant_name") uzyty dla pierwszego NotifyGameSetup hosta."""
+    """Obsluga GameManager::createGame. Zwraca (gid, pola_odpowiedzi, [Out...]). Ksztalt pierwszego setupu
+    zalezy od poziomu drabinki (LEVELS); poziom i jego uzasadnienie zostaja w grze ("variant", "variant_why")."""
     gmcd = _field(req_fields, "GMCD", []) or []
     cmgd = _field(req_fields, "CMGD", []) or []
     number, why = choose_variant(cfg)
@@ -432,7 +536,7 @@ def create_game(cfg, host: str, req_fields, others, lookup):
             "players": [host], "pending": [] if eff["invitee_in_setup"] else list(others),
             "pstate": {host: eff["host_state"]}, "completed": set(),
             "variant": number, "variant_name": eff["name"], "variant_why": why, "variant_about": eff["about"],
-            "finalized": False, "legacy_reason": eff["reason_unset"],
+            "shape": eff, "finalized": False, "failed": False,
             "echo": {"GSET": _field(gmcd, "GSET", 0) or 0, "PRES": _field(gmcd, "PRES", 1) or 1,
                      "VOIP": _field(gmcd, "VOIP", 2) or 2, "QCAP": _field(gmcd, "QCAP", 0) or 0,
                      "GTYP": _field(req_fields, "GTYP", "") or "gameType0",
@@ -442,25 +546,31 @@ def create_game(cfg, host: str, req_fields, others, lookup):
         GAMES[gid] = game
         everybody = [host] + [n for n in others]
         players = _snapshot(lookup, everybody)
-        reason = (tdf.UNION_UNSET, None) if eff["reason_unset"] else setup_reason_dataless(cfg, DCTX_CREATE_GAME)
-        reason_label = "REAS nieustawiona" if eff["reason_unset"] else "DLSC/CREATE"
+        legacy = eff["reason"] == "legacy"
+        host_reason = setup_reason_legacy(0) if legacy else setup_reason_dataless(cfg, DCTX_CREATE_GAME)
+        reason_label = "REAS jak FIFA 14 (VALU)" if legacy else "DLSC/CREATE"
         if eff["invitee_in_setup"]:
-            # stary przebieg: roster od razu pelny (host + zapraszani, wszyscy w stanie hosta), kazdy dostaje setup
+            # stary przebieg: roster od razu pelny (host + zapraszani w stanie hosta), kazdy dostaje swoj setup
             for j in others:
                 game["players"].append(j)
                 game["pstate"][j] = eff["host_state"]
+            guest_reason = setup_reason_legacy(2) if legacy else setup_reason_indirect_join(cfg)
             outs = []
-            for me_, other in ((host, others), ) + tuple((j, [n for n in game["players"] if n != j]) for j in others):
-                for o in other:
-                    fr = _user_added(lookup, o)
+            for me_ in [host] + list(others):
+                for other in game["players"]:
+                    if other == me_ or not eff.get("user_added", True):
+                        continue
+                    fr = _user_added(lookup, other)
                     if fr is not None:
-                        outs.append((me_, f"NotifyUserAdded {o}", fr))
-                outs.append((me_, f"NotifyGameSetup [0x0004::0x0014] ({'host' if me_ == host else 'zaproszony'}, "
-                                  f"pelny roster, {reason_label})",
-                             notify_game_setup(game, players, game["players"], reason, game["state"])))
+                        outs.append((me_, f"NotifyUserAdded {other}", fr))
+                is_host = me_ == host
+                outs.append((me_, f"NotifyGameSetup [0x0004::0x0014] ({'host' if is_host else 'zaproszony'}, "
+                                  f"pelny roster, {reason_label if is_host else 'REAS zaproszonego'})",
+                             notify_game_setup(game, players, game["players"],
+                                               host_reason if is_host else guest_reason, game["state"])))
         else:
             outs = [(host, f"NotifyGameSetup [0x0004::0x0014] (host, {reason_label})",
-                     notify_game_setup(game, players, [host], reason, game["state"]))]
+                     notify_game_setup(game, players, [host], host_reason, game["state"]))]
         if eff["followups"]:
             # jak w starym przebiegu: po setupie stany graczy i gry jeszcze raz jako osobne powiadomienia
             snap = _snapshot(lookup, game["players"])
@@ -493,10 +603,7 @@ def _join_players(cfg, game: dict, joiners, lookup, send_platform_host: bool = T
             fr = _user_added(lookup, j)
             if fr is not None:
                 outs.append((other, f"NotifyUserAdded {j}", fr))
-        if game.get("legacy_reason") and context == "indirect":
-            reason = (tdf.UNION_UNSET, None)
-            label = "NotifyGameSetup (zaproszony, REAS nieustawiona)"
-        elif context == "indirect" and getattr(cfg, "gm_indirect_join", True):
+        if context == "indirect" and getattr(cfg, "gm_indirect_join", True):
             reason = setup_reason_indirect_join(cfg)
             label = "NotifyGameSetup (zaproszony, IJGS)"
         else:
@@ -508,9 +615,9 @@ def _join_players(cfg, game: dict, joiners, lookup, send_platform_host: bool = T
         if send_platform_host:
             outs.append((j, "NotifyPlatformHostInitialized",
                          notify_platform_host_initialized(game["id"], players[game["host"]]["uid"])))
-        if cfg.gm_send_player_joining and not game.get("legacy_reason"):
+        if cfg.gm_send_player_joining:
             entry = player_entry(players[j], game["id"], game["players"].index(j), game["pstate"][j],
-                                 min(game["players"].index(j), 1))
+                                 min(game["players"].index(j), 1), game.get("shape", {}).get("new_players", True))
             for other in game["players"]:
                 if other != j:
                     outs.append((other, "NotifyPlayerJoining", notify_player_joining(game["id"], entry)))
