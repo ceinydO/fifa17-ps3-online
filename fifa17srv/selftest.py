@@ -4,6 +4,7 @@ It cannot prove the game behaves the same way -- that is what the real captures 
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import socket
@@ -117,8 +118,12 @@ def _gamemgr_checks() -> None:
     wd = gamemgr.watchdog_expired(cfg2, g3)
     check("watchdog: brak finalize usuwa gre i wysyla NotifyGameRemoved do graczy",
           {o[0] for o in wd} == {"host", "guest"} and gamemgr.attempt_info(g3) is None)
+    g4a, *_ = setup_of(gamemgr.create_game(cfg2, "host", req, ["guest"], lookup))
+    check("po pierwszej porazce (poziom 3) auto sprawdza raz od razu docelowy poziom 6",
+          gamemgr.attempt_info(g4a)[0] == 6)
+    gamemgr.watchdog_expired(cfg2, g4a)
     g4, *_ = setup_of(gamemgr.create_game(cfg2, "host", req, ["guest"], lookup))
-    check("po porazce poziomu 3 auto wraca do najnowszego dzialajacego (2)", gamemgr.attempt_info(g4)[0] == 2)
+    check("po porazce poziomu 6 auto wraca do najnowszego dzialajacego (2)", gamemgr.attempt_info(g4)[0] == 2)
     # sondy + dziennik prob
     from . import gmtrace
     trace_path = Path(tempfile.mkdtemp(prefix="fifa17srv_gmtrace_")) / "gm_attempts.log"
@@ -138,8 +143,42 @@ def _gamemgr_checks() -> None:
           and gamemgr.probe_frames(cfg2, g4, 1, lookup) == [])
     cfg3 = Config(state_dir=cfg2.state_dir, gm_variant=6)
     g6, o6, gsta6, st6, reas6 = setup_of(gamemgr.create_game(cfg3, "host", req, ["guest"], lookup))
+    # stara gra (g4, host + zaproszony) znika osobnym NotifyGameRemoved PRZED setupem nowej -- inaczej klient rozbiera
+    # ja w trakcie tworzenia nowej i pada (test na zywo 2026-10-11, crash 0x288ae0)
+    removed = [o for o in o6 if o[1].startswith("NotifyGameRemoved")]
+    first_setup = next(i for i, o in enumerate(o6) if o[1].startswith("NotifyGameSetup"))
+    check("nowy createGame usuwa stara gre hosta: NotifyGameRemoved dla kazdego czlonka, przed setupem nowej",
+          {o[0] for o in removed} == {"host", "guest"} and all(o[2][8:10] == (0x10).to_bytes(2, "big") for o in removed)
+          and all(i < first_setup for i, o in enumerate(o6) if o[1].startswith("NotifyGameRemoved"))
+          and gamemgr.attempt_info(g4) is None and gamemgr.attempt_info(g6) is not None)
     check("gm_variant=6 wymusza docelowy ksztalt: INITIALIZING, host sam, REAS DLSC",
-          gsta6 == gamemgr.STATE_INITIALIZING and st6 == [4] and reas6[1][0] == "DLSC" and {o[0] for o in o6} == {"host"})
+          gsta6 == gamemgr.STATE_INITIALIZING and st6 == [4] and reas6[1][0] == "DLSC"
+          and {o[0] for o in o6 if not o[1].startswith("NotifyGameRemoved")} == {"host"})
+    gamemgr.reset()
+
+    # --- rozlaczenie klienta hosta w trakcie proby (crash/zamkniecie) NIE jest porazka ksztaltu: ten sam poziom wraca
+    cfg4 = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmcrash_"))
+    c1, *_ = setup_of(gamemgr.create_game(cfg4, "host", req, ["guest"], lookup))
+    gamemgr.finalize_game(cfg4, "host", [("GID ", tdf.VARINT, c1)], lookup)         # poziom 1 OK
+    c2, *_ = setup_of(gamemgr.create_game(cfg4, "host", req, ["guest"], lookup))     # poziom 2
+    check("po sukcesie poziomu 1 jest poziom 2", gamemgr.attempt_info(c2)[0] == 2)
+    gamemgr.watchdog_expired(cfg4, c2)                                               # 14 s ciszy -> "fail"
+    gamemgr.on_disconnect(cfg4, "host", lookup)                                      # ... a potem okno hosta zamkniete
+    c3, *_ = setup_of(gamemgr.create_game(cfg4, "host", req, ["guest"], lookup))
+    check("rozlaczenie hosta po werdykcie watchdoga to crash, nie porazka: poziom 2 jest powtorzony",
+          gamemgr.attempt_info(c3)[0] == 2 and "rozlaczeniem" in gamemgr.GAMES[c3]["variant_why"],
+          gamemgr.GAMES[c3]["variant_why"])
+    gamemgr.on_disconnect(cfg4, "host", lookup)                                      # drugi crash tego samego poziomu
+    c4, *_ = setup_of(gamemgr.create_game(cfg4, "host", req, ["guest"], lookup))
+    check("po drugim rozlaczeniu na tym samym poziomie uznajemy go za nieudany (i sprawdzamy cel 6)",
+          gamemgr.attempt_info(c4)[0] == 6 and 2 in json.loads(cfg4.gm_variant_path.read_text())["bad"],
+          gamemgr.GAMES[c4]["variant_why"])
+    # plik stanu z innej wersji formatu (wynik z crasha na starej grze) jest ignorowany
+    stale_state = cfg4.gm_variant_path
+    stale_state.write_text('{"level": 2, "result": "fail", "good": [1], "bad": []}', encoding="utf-8")
+    c5, *_ = setup_of(gamemgr.create_game(cfg4, "host", req, ["guest"], lookup))
+    check("stary plik stanu drabinki (bez wersji) jest ignorowany -- start od poziomu 1",
+          gamemgr.attempt_info(c5)[0] == 1)
     gamemgr.reset()
 
 

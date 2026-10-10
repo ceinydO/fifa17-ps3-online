@@ -47,8 +47,13 @@ Cel: znalezc najnowszy ksztalt pierwszego setupu, po ktorym klient hosta dochodz
 2. Host: Online Friendlies -> zaproszenie kolegi. Poczekaj ~15 s. W logu serwera: `POZIOM n (...)`, potem
    `finalizeGameCreation od ... SUKCES poziomu n` albo `WATCHDOG ... BRAK finalizeGameCreation`.
 3. Po sukcesie ekran hosta wroci do poprzedniego widoku (jak dawniej) -- zrob zaproszenie JESZCZE RAZ: serwer
-   sprobuje poziom wyzej. Po porazce (watchdog usuwa gre) tez po prostu ponow; serwer wroci do dzialajacego poziomu.
-   Jesli ekran hosta nie wroci po watchdogu, zamknij tylko emulator hosta (serwer zostaje) i ponow.
+   najpierw usunie stara gre (`NotifyGameRemoved` dla hosta i kolegi), potem sprobuje poziom wyzej. Po porazce
+   (watchdog usuwa gre) tez po prostu ponow; serwer wroci do dzialajacego poziomu.
+   Jesli emulator hosta sie zawiesi/wywali (w logu RPCS3 `Access violation` / `Emulation has been frozen`), zamknij
+   tylko emulator hosta (serwer zostaje), uruchom go ponownie i ponow -- to rozlaczenie NIE liczy sie jako porazka
+   poziomu, ten sam poziom zostanie powtorzony (po drugim takim rozlaczeniu na jednym poziomie uznany za nieudany).
+   Zapisz, co WIDAC na ekranie hosta i kolegi po kazdej probie (czy jest "please wait", blad, powrot do menu,
+   okno zaproszenia).
 4. Powtarzaj, az poziom 6 przejdzie albo zobaczysz, od ktorego poziomu przestaje dzialac.
 5. Po tescie (serwer moze dzialac dalej): `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` -- tworzy
    `fifa17_logs_<data>.zip` (logi sesji serwera, `gm_attempts.log`, przechwyty polaczen z 3 godzin, `state\gm_variant.json`,

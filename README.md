@@ -64,7 +64,7 @@ Logi RPCS3 hosta ze starego (2026-10-08) i nowego przebiegu sa prawie identyczne
 5. `+zaproszony-po-finalize` -- host sam w pierwszym setupie;
 6. `6-initializing` -- INITIALIZING + brak follow-upow (docelowy; tylko on daje 'gses' potrzebne do zaproszenia).
 Tryb auto: poziom 1 na start; kazdy `createGame`, ktory doszedl do `finalizeGameCreation` hosta, zwieksza poziom przy
-nastepnej probie; porazka (watchdog 12 s) cofa do najnowszego dzialajacego i usuwa gre (`NotifyGameRemoved`,
+nastepnej probie; porazka (watchdog 14 s) cofa do najnowszego dzialajacego i usuwa gre (`NotifyGameRemoved`,
 `gm_watchdog_remove`), zeby host mogl ponowic bez restartu. Stan: `state/gm_variant.json`. W logu serwera:
 `POZIOM n`, `WATCHDOG ...`, `SUKCES poziomu n`. Dodatkowo identyfikatory graczy sa teraz < 2^31
 (`ids.uid_for`: 1.1e9..2.0e9) -- host `odyniec` mial wczesniej uid 2 999 187 369, a stary dzialajacy przebieg uzywal
@@ -72,6 +72,31 @@ tylko wartosci < 2^31.
 **Diagnostyka pod jeden test:** `logs/session_*.log` (caly log konsoli), `logs/gm_attempts.log` (dziennik prob: kazde
 powiadomienie GameManager rozkodowane, kazde zadanie klientow z czasem w ms, wynik), sondy po 3/6/9 s gdy host milczy
 (`gm_probes`), flush przechwytow co 2 s, `collect_logs.ps1` pakuje to wszystko do jednego zip-a. Selftest 43/43.
+
+**Test 2026-10-11 (pierwszy z drabinka; logi serwera + RPCS3 hosta `odyniec` i kolegi `odyniec1`):**
+- **Poziom 1 (bajt w bajt jak stary) doszedl do konca na OBU klientach**: i host, i kolega (`odyniec1`) wyslali
+  `updateMeshConnection` (STAT=2) oraz `finalizeGameCreation` w ciagu 0,2 s od setupu; oba zbindowaly UDP 3659/9999.
+  Potem host: lookup `odyniec1` + statystyki `MyFriendlies` (`EID=[0]`), i ~13,7 s po setupie `sceNpBasicSetPresence`
+  (64 B) -- kolega dostaje wtedy `basic_event: event:1 (PRESENCE)` i sam robi lookup `odyniec`. Zadnego
+  `sceNpBasicSendMessageGui` (zaproszenia) nadal nie ma -- identycznie jak w starym przebiegu z 2026-10-08.
+- **Drugi `createGame` (poziom 2) wywalil emulator hosta**: `·F ... VM: Access violation reading location 0x0`,
+  `FEThread`, PC `0x288ae0`, potem `Emulation has been frozen!` (u kolegi bez crasha). Stos: handler NotifyGameSetup
+  `0xc6e0b8` -> `0xc6dad8` -> start sieci `0xcb98e8` -> `onNetworkCreated 0xc6a92c` -> `0xc6a4e0` -> callback konca
+  zadania (`0xc71c44`) -> `0x2dee08` (log `GSMR SUCC`: tworzy `GameSession` `0x2891e4` i ustawia ja w `gses`) ->
+  `onPlayerAdded 0x288f8c` -> `0x288e58` -> `0x288a84`, ktore dereferuje wynik `0x2887d4` ("biezaca gra" z `gses`,
+  a gdy brak -- z `gsmp`) == NULL. **Przyczyna to nie kształt poziomu 2, tylko STARA GRA**: po sukcesie poziomu 1
+  gra GID=1 zostala na serwerze (i w kliencie), wiec setup GID=2 kazal klientowi rozebrac GID=1 w trakcie tworzenia
+  GID=2 (host wyslal `removePlayer GID=1 PID=odyniec1 REAS=7` i `updateMeshConnection GID=1 STAT=0` ze smieciowym
+  `FLGS=0xCDCDCDCD`, zamknal gniazdo UDP 9999 starej gry) i zostal bez biezacej gry. Wczesniejsze crashe
+  (`0x2ef598`, odczyt `0x90`; 26.09 i 08.10 wieczorem) to INNY blad.
+- Poziom 2 nie zostal wiec naprawde przetestowany (kolega przy tym samym setupie tez nie wyslal `finalizeGameCreation`,
+  ale oba klienty rozbieraly wtedy stara gre).
+**Poprawki (niezweryfikowane na zywo):** (1) kazdy nowy `createGame` hosta najpierw usuwa jego wczesniejsze gry
+(`NotifyGameRemoved` do wszystkich czlonkow, przed nowym setupem; `gamemgr._retire_stale_locked`); (2) rozlaczenie
+klienta hosta w trakcie proby (crash/zamkniecie okna, takze po werdykcie watchdoga w ciagu 120 s) NIE liczy sie jako
+porazka poziomu -- ten sam poziom jest powtarzany, dopiero drugie takie rozlaczenie oznacza go jako nieudany
+(`result: crash`, `crashes` w `state/gm_variant.json`); (3) plik stanu ma wersje (`v: 2`) -- stary wynik "poziom 2
+nieudany" jest ignorowany, drabinka startuje od poziomu 1; (4) watchdog = 14 s. Selftest 48/48.
 
 ## Latest session: 2026-10-09 (analiza dekompilatorem, przebudowa GameManager)
 

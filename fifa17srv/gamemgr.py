@@ -111,21 +111,31 @@ LEVELS = {
 }
 MAX_LEVEL = max(LEVELS)
 _VARIANT_LOCK = threading.Lock()
+# Wersja formatu pliku stanu drabinki. Wynik zapisany starszym kodem (np. "poziom 2 nieudany" z testu, w ktorym
+# klient hosta wywalil sie na starej grze GID=1) nie jest wiarygodny -- plik innej wersji jest ignorowany.
+STATE_VERSION = 2
+# Ile razy ten sam poziom moze urwac polaczenie klienta hosta (crash/zamkniecie okna w trakcie proby), zanim uznamy
+# go za nieudany. Rozlaczenie nie jest dowodem, ze to ksztalt setupu zawinil, wiec pierwsze urwanie jest powtarzane.
+MAX_CRASHES_PER_LEVEL = 2
+CRASH_WINDOW_SECONDS = 120.0
+_LAST_ATTEMPT: dict = {}          # host -> {"level": n, "t0": monotonic, "finalized": bool}
 
 
 def _read_variant_state(path):
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else None
     except (OSError, ValueError, AttributeError):
         return None
+    if not isinstance(data, dict) or data.get("v") != STATE_VERSION:
+        return None
+    return data
 
 
 def _write_variant_state(path, data) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(dict(data, v=STATE_VERSION), indent=2), encoding="utf-8")
         os.replace(tmp, path)
     except (OSError, AttributeError):
         pass
@@ -134,8 +144,10 @@ def _write_variant_state(path, data) -> None:
 def choose_variant(cfg):
     """Wybiera poziom dla nowego createGame -> (numer | None, uzasadnienie). None = pojedyncze przelaczniki
     (gm_variant = -1). Auto (0): poziom 1 na start; poprzedni poziom OK -> nastepny wyzszy (o ile nie byl juz
-    nieudany), nie OK -> najnowszy dzialajacy (lub, gdy zaden nie dzialal, kolejny wyzszy). Stan w pliku
-    state/gm_variant.json: {"level", "result": pending|ok|fail, "good": [...], "bad": [...]}."""
+    nieudany), nie OK -> najnowszy dzialajacy (lub, gdy zaden nie dzialal, kolejny wyzszy). Proba, w ktorej klient
+    hosta sie rozlaczyl (crash/zamkniecie okna), nie jest dowodem nieudanego ksztaltu -- ten sam poziom jest
+    powtarzany (do MAX_CRASHES_PER_LEVEL razy). Stan w pliku state/gm_variant.json:
+    {"v", "level", "result": pending|ok|fail|crash, "good": [...], "bad": [...], "crashes": {"poziom": n}}."""
     forced = getattr(cfg, "gm_variant", 0)
     if forced < 0:
         return None, "gm_variant=-1: pojedyncze przelaczniki gm_*"
@@ -147,39 +159,59 @@ def choose_variant(cfg):
         st = (_read_variant_state(path) if path is not None else None) or {}
         level, result = st.get("level"), st.get("result")
         good, bad = set(st.get("good", [])), set(st.get("bad", []))
+        crashes = {int(k): v for k, v in (st.get("crashes") or {}).items()}
         if level not in LEVELS:
             number, why = 1, "pierwsza proba -- zaczynamy od ksztaltu jak stary, dzialajacy przebieg"
         else:
-            if result == "ok":
-                good.add(level)
-                bad.discard(level)
-            else:
-                bad.add(level)
-                good.discard(level)
-            best = max(good) if good else 0
-            if result == "ok":
-                if level + 1 <= MAX_LEVEL and level + 1 not in bad:
-                    number, why = level + 1, f"poziom {level} doszedl do finalizeGameCreation -- probuje nowszy"
+            retry = False
+            if result == "crash":
+                crashes[level] = crashes.get(level, 0) + 1
+                if crashes[level] < MAX_CRASHES_PER_LEVEL:
+                    retry = True
                 else:
-                    number, why = best, f"poziom {level} dziala, nowszego brak/nie dziala -- zostaje {best}"
-            elif best:
-                number, why = best, f"poziom {level} NIE doszedl do finalizeGameCreation -- wraca do {best}"
+                    result = "fail"
+            if retry:
+                number = level
+                why = (f"poprzednia proba poziomu {level} skonczyla sie rozlaczeniem klienta hosta (crash/zamkniecie "
+                       f"gry) -- to nie dowod, ze ksztalt jest zly; powtarzam ten sam poziom "
+                       f"({crashes[level]}/{MAX_CRASHES_PER_LEVEL})")
             else:
-                number = level + 1 if level < MAX_LEVEL else 1
-                why = f"poziom {level} NIE doszedl do finalizeGameCreation, zaden nie dziala -- probuje {number}"
+                if result == "ok":
+                    good.add(level)
+                    bad.discard(level)
+                else:
+                    bad.add(level)
+                    good.discard(level)
+                best = max(good) if good else 0
+                if result == "ok":
+                    if level + 1 <= MAX_LEVEL and level + 1 not in bad:
+                        number, why = level + 1, f"poziom {level} doszedl do finalizeGameCreation -- probuje nowszy"
+                    else:
+                        number, why = best, f"poziom {level} dziala, nowszego brak/nie dziala -- zostaje {best}"
+                elif best:
+                    if level != MAX_LEVEL and MAX_LEVEL not in good and MAX_LEVEL not in bad:
+                        # poziomy sa kumulatywne, ale pierwsza porazka nie mowi nic o celu -- sprawdzamy go raz od razu
+                        number = MAX_LEVEL
+                        why = (f"poziom {level} NIE doszedl do finalizeGameCreation -- sprawdzam jeszcze raz od razu "
+                               f"docelowy poziom {MAX_LEVEL} (potem wracam do {best})")
+                    else:
+                        number, why = best, f"poziom {level} NIE doszedl do finalizeGameCreation -- wraca do {best}"
+                else:
+                    number = level + 1 if level < MAX_LEVEL else 1
+                    why = f"poziom {level} NIE doszedl do finalizeGameCreation, zaden nie dziala -- probuje {number}"
         if path is not None:
-            _write_variant_state(path, {"level": number, "result": "pending",
-                                        "good": sorted(good), "bad": sorted(bad)})
+            _write_variant_state(path, {"level": number, "result": "pending", "good": sorted(good),
+                                        "bad": sorted(bad), "crashes": {str(k): v for k, v in sorted(crashes.items())}})
         return number, why
 
 
-def _set_result(cfg, number, result: str) -> None:
+def _set_result(cfg, number, result: str, allowed=("pending",)) -> None:
     path = getattr(cfg, "gm_variant_path", None)
     if path is None or number not in LEVELS or getattr(cfg, "gm_variant", 0) != 0:
         return
     with _VARIANT_LOCK:
         st = _read_variant_state(path)
-        if st and st.get("level") == number and st.get("result") == "pending":
+        if st and st.get("level") == number and st.get("result") in allowed:
             st["result"] = result
             _write_variant_state(path, st)
 
@@ -192,6 +224,12 @@ def mark_finalized(cfg, number) -> None:
 def mark_failed(cfg, number) -> None:
     """Minal czas na finalizeGameCreation hosta -- ten poziom nie dziala."""
     _set_result(cfg, number, "fail")
+
+
+def mark_crashed(cfg, number) -> None:
+    """Klient hosta rozlaczyl sie w trakcie proby (takze juz po werdykcie watchdoga: zamrozona gra zamykana przez
+    uzytkownika). Nie liczy sie jako porazka ksztaltu -- patrz choose_variant."""
+    _set_result(cfg, number, "crash", allowed=("pending", "fail"))
 
 
 def effective_settings(cfg, number):
@@ -281,6 +319,7 @@ def reset() -> None:
     """Czysci stan (testy)."""
     with GAMES_LOCK:
         GAMES.clear()
+        _LAST_ATTEMPT.clear()
         _next_game_id[0] = 1
 
 
@@ -552,6 +591,22 @@ def _snapshot(lookup, names):
 
 
 # ------------------------------------------------------------------------------------------- createGame
+def _retire_stale_locked(name: str) -> list:
+    """Usuwa (NotifyGameRemoved do wszystkich czlonkow) kazda wczesniejsza gre, w ktorej jest `name`.
+    Test na zywo 2026-10-11: po udanej probie poziomu 1 gra GID=1 zostala na serwerze, wiec klient hosta, dostajac
+    setup GID=2, rozbieral GID=1 W TRAKCIE tworzenia GID=2 (removePlayer + updateMeshConnection STAT=0 dla GID=1)
+    i padl na odczycie NULL w tworzeniu sesji gry (0x288ae0: brak biezacej gry). Klient trzyma jedna gre naraz,
+    wiec przed nowa gra stara musi zniknac osobnym powiadomieniem."""
+    outs = []
+    for gid in [g["id"] for g in GAMES.values()
+                if g["host"] == name or name in g["players"] or name in g.get("pending", [])]:
+        game = GAMES.pop(gid)
+        for n in game["players"]:
+            outs.append((n, f"NotifyGameRemoved GID={gid} (stara gra {name!r}, nowy createGame)",
+                         notify_game_removed(gid, 0)))
+    return outs
+
+
 def create_game(cfg, host: str, req_fields, others, lookup):
     """Obsluga GameManager::createGame. Zwraca (gid, pola_odpowiedzi, [Out...]). Ksztalt pierwszego setupu
     zalezy od poziomu drabinki (LEVELS); poziom i jego uzasadnienie zostaja w grze ("variant", "variant_why")."""
@@ -560,8 +615,10 @@ def create_game(cfg, host: str, req_fields, others, lookup):
     number, why = choose_variant(cfg)
     eff = effective_settings(cfg, number)
     with GAMES_LOCK:
+        stale = _retire_stale_locked(host)
         gid = _next_game_id[0]
         _next_game_id[0] += 1
+        _LAST_ATTEMPT[host] = {"level": number, "t0": time.monotonic(), "finalized": False}
         version = _field(cmgd, "GVER", "") or ""
         game = {
             "id": gid, "host": host,
@@ -618,7 +675,7 @@ def create_game(cfg, host: str, req_fields, others, lookup):
                                  notify_player_state_change(gid, snap[n]["uid"], game["pstate"][n])))
                 outs.append((target, f"NotifyGameStateChange {game['state']}",
                              notify_game_state_change(gid, game["state"])))
-        return gid, create_game_response_fields(gid), outs
+        return gid, create_game_response_fields(gid), stale + outs
 
 
 def _join_players(cfg, game: dict, joiners, lookup, send_platform_host: bool = True,
@@ -674,6 +731,8 @@ def finalize_game(cfg, name: str, req_fields, lookup) -> list:
         if name == game["host"]:
             game["finalized"] = True
             mark_finalized(cfg, game.get("variant"))
+            if name in _LAST_ATTEMPT:
+                _LAST_ATTEMPT[name]["finalized"] = True
         players = _snapshot(lookup, game["players"])
         host_uid = players[game["host"]]["uid"]
         outs = []
@@ -806,6 +865,10 @@ def on_disconnect(cfg, name: str, lookup) -> list:
     """Gracz stracil polaczenie z serwerem: wypisz go ze wszystkich gier."""
     outs = []
     with GAMES_LOCK:
+        last = _LAST_ATTEMPT.pop(name, None)
+        if (last and not last["finalized"] and last["level"] is not None
+                and time.monotonic() - last["t0"] < CRASH_WINDOW_SECONDS):
+            mark_crashed(cfg, last["level"])
         for gid in [g["id"] for g in GAMES.values() if name in g["players"]]:
             uid = ids.uid_for(name)
             outs.extend(remove_player(cfg, name, [("GID ", tdf.VARINT, gid), ("PID ", tdf.VARINT, uid),
