@@ -15,264 +15,246 @@ game itself.
 > source of truth for what is confirmed, what is a guess, and what is still broken — so a fresh
 > session (human or Claude) does not have to re-derive it from scratch.
 
-## Latest session: 2026-10-11 wieczor (host-only drabinka OK na wszystkich poziomach; zaproszenia nadal brak)
+## Quick orientation (2026-10-11, late evening)
 
-**Wynik testu (`logs/gm_attempts.log` 13:34-13:38, RPCS3 hosta `odyniec` i kolegi `odyniec1`):**
-- 8 x `createGame`, poziomy 1-5 (host-only) -> **kazdy doszedl do `finalizeGameCreation`, zero crashy** (poprawka z b015730
-  dziala). Stan: `state/gm_variant.json` = poziom 5, wszystkie "good". Poziomy 3-5 (INITIALIZING) host zamyka sam
-  `advanceGameState(PRE_GAME)` (cmd 0x0003) -- to normalny przebieg.
-- Po finalize host robi **zawsze to samo, niezaleznie od poziomu**: ~0,7 s: `lookupUsersByPersonaNames(['odyniec1'])`,
-  ~0,8 s: `Stats::getStatsByGroupAsync` grupy `MyFriendlies` dla WLASNEGO EID, i **cisza** (nic na Blaze az do
-  recznej nastepnej proby ~30 s pozniej). Kolega nie wysyla niczego (nie ma `joinGame`).
-- **RPCS3 hosta: zero wywolan `sceNpBasicSendMessageGui`** i zero `sceNpLookup*` poza inicjalizacja przy starcie
-  (`sceNpLookupInit/CreateTitleCtx`), czyli lancuch wysylki zaproszenia (nizej) nie dochodzi do NP.
-  Kolega: tylko `basic_event: event:1` (PRESENCE) i `event:0` (OFFLINE), nigdy `event:5`/`event:2`.
-- **Telemetria (nowy odczyt `logs/captures/telemetry_*.txt`, tresc jest jawnym tekstem po deszyfrowaniu TLS):** jedyne
-  zdarzenia to `client_bugsentry` -> `ServerError`, `server_name:"SportsWorld"`, `server_type:"https"`,
-  `errid:"disconnect"`, powtarzane przy KAZDYM `lookupUsersByPersonaNames` (u hosta i kolegi, takze po createGame).
-  SportsWorld = usluga EASW (klucze konfiguracji `OSDK_EASW_AUTH_URL/REQ_URL/MEDIA_URL/EVENT_URL/GF_FILE_URL`,
-  modul `0x30eb10`, op `ConnectToSportsWorld` `0x309388`, `LoadSportsWorldUserPresence` `0x30f2f0`,
-  `SendFriendsToSportsWorld` `0x30f068`); serwer nie podaje tych kluczy, wiec gra konczy kazde zapytanie bledem
-  "disconnect". **Czy to blokuje zaproszenie -- nieznane** (nie ma dowodu ani za, ani przeciw).
-  (Kosmetyka: `pid` w telemetrii jest ten sam u obu graczy, bo `postAuth.UROP.UID` dostaje stala wartosc hosta.)
+**Goal:** two real players (two PCs, RPCS3, Radmin VPN) play an *Online Friendlies* match: the host invites a
+friend, the friend sees the invitation, accepts, both end up in the same Blaze game and exchange P2P traffic.
 
-**Lancuch wysylki zaproszenia na PS3 (statycznie, dekompilacja; flaga `UNK_025fbcd0` jest tylko czytana, nigdy pisana,
-=0 => sciezka NP):** Flash UI -> adaptor `OSDK_GameInvitationAdaptor` (`0x16491b4` SendGameInvite /
-`0x1649264` SendMultipleGameInvites; **po cichu nic nie robia, gdy modul `ginv` nie jest zarejestrowany**) ->
-modul `ginv` (`0x301ad4`, rejestrowany w `0x302184` gdy `Invitations[5]==1`) -> op `SendGameInvite`
-(`0x3019a4`) -> menedzer `puid` (`0x2cd938`, op "LookupPlatformUserId": najpierw lokalna lista znajomych `0x2f8b50`/
-`0x27ea00`, dopiero potem `sceNpLookupNpIdAsync`) -> callback `0x30262c` -> `0x302454` (wymaga biezacej sesji z `gses`
-vt[0x24], inaczej zwraca blad 4 bez NP) -> `sceNpBasicSendMessageGui`. Poza tym wywoluje go tylko `0x2f95c0`
-(inna operacja, jeden odbiorca). `sceNpBasicSendMessage/Attachment` nie sa nigdzie wolane.
-Nie wiadomo, **na ktorym ogniwie lancuch sie zatrzymuje** (UI w ogole nie wola adaptora / modulu `ginv` brak /
-op konczy sie bledem) -- dlatego nowe narzedzie ponizej.
+**Where we are:**
+- Login, persona lookup, entitlements, messaging, stats and the whole host-side `createGame` handshake work
+  (`createGame` -> `NotifyGameSetup` -> `updateMeshConnection` -> `finalizeGameCreation` all complete, no crash, on
+  all five "host-only" setup levels, see below).
+- **The invitation is still never sent.** The host's game does not call `sceNpBasicSendMessageGui` (the NP call that
+  delivers the invitation to the friend), so the friend sees nothing. A trace patch for RPCS3 (below) showed that the
+  game finishes `createGame` internally ("GSMR" success callback) but never raises `EVENT_CREATEGAME_SUCCESS`, which
+  the UI needs before it asks the invitation module to send anything.
+- Next step: run **round 2 of the trace patch** (39 hooks, see "Trace patch" below) with both players online for the
+  whole test, then read the result with `tools/decode_trace.py`.
 
-**Nowe narzedzie: lata-znaczniki RPCS3 (`tools/make_trace_patch.py`, `tools/rpcs3_patch_trace_invites.yml`).**
-Podmienia drugie slowo (`bl _savegpr_N`) w 39 funkcjach (lancuch zaproszenia, `post_event` = KAZDE zdarzenie UI
-`EVENT_*`, handlery NP, operacje SportsWorld) na `bl` do stuba w nieuzywanym obszarze `0x0211D810`; stub wola
-wspolna procedure, ktora zachowuje wszystkie rejestry i loguje argumenty przez `cellRtcSetTime_t` (RPCS3 drukuje
-`iTime=0xFA<id><k><wartosc>`). Dekoder: `tools/decode_trace.py RPCS3.log --elf EBOOT.ELF` (nazwy zdarzen czyta z
-EBOOT). Instalator: `tools/install_trace_patch.py <folder rpcs3>`. Kodowanie sprawdzone capstone, a semantyka
-(zachowanie r0-r12, f1-f13, LR, CR, CTR, poprawny log) wlasnym emulatorem w `--selftest` (wlaczone do selftestu repo).
-**Nie sprawdzone na zywo w RPCS3** (rekompilator PPU) -- jesli gra nie startuje, odznacz latke w Patch Managerze.
+**Useful commands:** server `powershell -ExecutionPolicy Bypass -File .\update_and_run.ps1` (host only);
+logs for analysis `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` (zip) + `RPCS3.log` of both players;
+selftest `python -m fifa17srv selftest` (58 checks).
 
-**Zmiana serwera:** `MAX_PREGAME_TIMEOUT=120` w konfiguracji klienta (`OSDK_CORE_DEFAULTS`; EBOOT `0x4d087c` czyta
-go z konfiguracji, domyslnie 10 s -- host wracal do menu po ~14 s, zanim kolega zdazylby przyjac zaproszenie).
-Atrapa telemetrii czyta teraz cala tresc zadania (Content-Length) i loguje ja do logu sesji (`telemetry tresc: ...`).
+## Latest session: 2026-10-11, late evening (trace patch, round 1 worked in real RPCS3)
 
-## Latest session: 2026-10-09 wieczor (pierwszy test na zywo po przebudowie GameManager)
+**What the host's `RPCS3.log` (with the round-1 trace patch) showed.** The patch was applied (`PAT: Applied patch ...
+FIFA trace ... (<- 270)`), the game booted normally and every marker line was readable
+(`python tools/decode_trace.py RPCS3.log --elf EBOOT.ELF`). The friend was online for the first `createGame` and
+had left by the second one.
+- Module `ginv` (the invitation module, hook `0x302184`) **is registered right after login**, so the invitation path
+  exists at runtime.
+- Each `createGame` runs the game-side result callback `0x2dee08` ("GSMR", `r4 = 0` = success) ~25 ms after the request
+  started, i.e. right after the Blaze `finalizeGameCreation` round trip.
+- **After that nothing happens.** No `EVENT_CREATEGAME_SUCCESS` (posted by the UI listener `0x1624e1c`), no
+  `EVENT_GAME_SESSION_CHANGED`, no `EVENT_CREATEGAME_FAILURE`, and **none** of the invitation functions
+  (`0x16491b4`/`0x1649264` adaptors, `0x301ad4`, `0x3019a4`, `0x2cd938`, `0x30262c`, `0x302454`) is ever entered.
+  Only 22 `EVENT_*` posts occurred in the whole 135 s session (`EVENT_NETWORK_START/END`, `LOGIN_*`, `UNSUSPEND*`,
+  `BOOT_LOGIN_SUCCESS`), so the UI event system is lightly used.
+- SportsWorld (EASW web service) operations fire constantly (`ConnectToSportsWorld`, `LoadSportsWorldUserPresence`,
+  `LoadSportsWorldUsers`, `SendFriendsToSportsWorld`), each ending in the `ServerError ... disconnect` telemetry event
+  (the server does not provide `OSDK_EASW_*_URL`). Whether this blocks the invitation is **unknown**.
 
-**Wynik testu (host `odyniec` + kolega `odyniec1`, Radmin, logi serwera i obu RPCS3):**
-- Logowanie, lookup persony, `listEntitlements`, `Messaging::fetchMessages/getMessages` i Stats dzialaja u obu.
-- Host wyslal `createGame` (PLJD: wlasny CGID `(30722,2,uid)` odeslany poprawnie, zarezerwowany kolega z
-  unikalnym uid) -> serwer odpowiedzial `CreateGameResponse GID=1` + `NotifyGameSetup` (DLSC/CREATE, GSTA=1,
-  host STAT=2). Klient hosta po tym zbindowal UDP **3659 i 9999** (czyli zaczal tworzyc siec gry), ale
-  **NIE wyslal ani `updateMeshConnection`, ani `finalizeGameCreation`** i nie wywolal `sceNpBasicSendMessageGui`;
-  po ok. minucie uzytkownik zamknal emulator. Kolega nie dostal nic (zaproszony dolacza dopiero po finalize).
-- **To jest REGRESJA wzgledem ostatniego testu na zywo (commit 2c9842c):** tam ten sam lancuch dochodzil do
-  `finalizeGameCreation`. Stary setup mial GSTA=130 (PRE_GAME), obu graczy z STAT=4, REAS nieustawiona (zly tag
-  VALU = unia pusta) oraz osobne `GamePlayerStateChange` x2 + `GameStateChange`. Nowy ma GSTA=1, tylko hosta ze
-  STAT=2, REAS=DLSC i brak follow-upow.
+**Reading of the createGame completion path (static, decompiled).** `0x2dee08` (op class at `0x28e208`, created by
+`GameSessionManager::createGame` `0x28efa4`, listener = the UI adaptor sub-object `this+0xc` set in `0x1624180`):
+on success it builds the `GameSession` (`0x2891e4`), calls `gses::setCurrentSession` (`0x2911b8`), then
+- if the op's pending player-attribute list (`op+0x2c`, 32-byte entries) is **empty**: logs `GSMR/SUCC` through the OSDK
+  trace function `0x2e8448` and calls the listener's `vt[0]` -> `0x1624e1c` -> `EVENT_CREATEGAME_SUCCESS`;
+- otherwise: creates a `SetPlayerAttribute` op (`0x28a384`) and only completes (`0x2deb88`) after it finishes.
+Since no Blaze `setPlayerAttributes` request was ever seen on the wire, either that op never runs/never sends, or the
+listener call is never made. Round 2 hooks exactly these points.
 
-**Co ustalila dekompilacja w tej sesji (adresy w EBOOT FIFA 17 PS3):**
-- `0xc6e0b8` = handler NotifyGameSetup: znajduje zadanie createGame po (indeks uzytkownika, GID), tworzy `Game`
-  (`0xc69ed0` -> ctor `0xc58c3c`), potem `0xc6dad8` -> `0xc60028` odpala tworzenie sieci gry. Wynik sieci wraca do
-  `0xc6a92c` (onNetworkCreated) -> `0xc6a4e0`, ktore dla hosta wysyla `finalizeGameCreation` (`0xc6a204`), a dla
-  dolaczajacego `updateMeshConnection STAT=2` (`0xc59f14`). `updateMeshConnection` hosta nie wysyla.
-- Odpowiedz na finalize (`0xc6bf74`) konczy zadanie createGame sukcesem, gdy `0xc5b8c0` zwroci prawde
-  (dla REAS nieustawionej i DLSC z DCTX!=3 -- tak). Dopiero wtedy FE moze wyslac zaproszenie.
-- Wysylka zaproszenia (`0x302454`) wymaga biezacej sesji w komponencie `gses`; bez niej zwraca blad bez wywolania
-  `sceNpBasicSendMessageGui`. Kod FIFA ustawia id gry dla hosta w obsludze stanu INITIALIZING, wiec sam stary
-  przebieg (od razu PRE_GAME) mogl dojsc do konca createGame, ale nie do zaproszenia.
-- `isHost` w `Game` = (BlazeId z THST/PHST.HPID == BlazeId zalogowanego uzytkownika z listy lokalnych graczy);
-  `vtable[0x28]` gry zwraca id hosta topologii (`Game+0x1b8`), a handler NotifyGameSetup wraca bez dzialania, gdy to 0.
-- Obserwacja: naglowek `Easw-Session-Data-Nucleus-Id` (POW, `0x51c1e4`) mial u hosta id KOLEGI (2028699422), u kolegi
-  jego wlasne. FIFA pobiera je z innego kontenera uzytkownikow niz lista graczy lokalnych (hipoteza: pierwszy/min id).
-  Nie wplywa na GameManager (tam porownanie idzie po liscie lokalnych), ale warto pamietac przy FUT/POW.
+## Trace patch for RPCS3 (diagnostic tool, works)
 
-**Test 2026-10-10 (logi RPCS3 hosta i kolegi, bez logu serwera):** nadal brak polaczenia. W logu hosta jest jedna
-para `bind` UDP 3659/9999 (jedno `createGame`), potem nic -- zadnego `sceNpBasicSendMessageGui`; u kolegi nie bylo
-bindu 9999, wiec nie dostal zadnego setupu (zaproszony dostaje setup dopiero po `finalizeGameCreation` hosta).
-`NPHandler: basic_event: event:0` to u RPCS3 OFFLINE znajomego (1 = presence, 5 = zaproszenie), nie wiadomosc.
-Logi RPCS3 hosta ze starego (2026-10-08) i nowego przebiegu sa prawie identyczne -- rozstrzyga tylko log serwera.
-**Z archiwalnego logu serwera (stary przebieg, 2026-10-08 22:02 UTC):** po setupie host wysylal OD RAZU
-`updateMeshConnection` (STAT=2, TCG=(30722,2,0)) i `finalizeGameCreation`, potem FE robil lookup kolegi i statystyki
-`MyFriendlies` i wracal do poprzedniego ekranu bez zaproszenia (czyli createGame konczyl sie sukcesem).
+The server cannot see what the game does *inside* the emulator. `tools/make_trace_patch.py` generates an RPCS3 PPU
+patch (`tools/rpcs3_patch_trace_invites.yml`) that logs when selected game functions are entered:
+- Every hooked function starts with `mflr r0 ; bl _savegpr_N`. The patch replaces only the second word with a `bl` to a
+  tiny stub in an unused, zero-filled area of the code segment (`0x0211D810`). The stub saves LR in `r12`, calls a
+  common routine that preserves **all** of r0-r12, f1-f13, LR, CR and CTR, restores LR and tail-jumps to the original
+  `_savegpr_N`, so the hooked function behaves exactly as before.
+- The common routine logs through `cellRtcSetTime_t(pDateTime, iTime)`, which RPCS3 prints with its arguments:
+  `iTime = 0xFA | id(8 bit) | k(16 bit) | value(32 bit)` where `k` is the argument index (0 = r3, 1 = r4, 2 = r5). The
+  game itself calls the same function with ordinary timestamps (`0x5884....`), so the markers are easy to spot.
+- `tools/decode_trace.py RPCS3.log [--elf EBOOT.ELF] [--all]` prints a chronological table (markers, event names
+  resolved from the ELF, and the surrounding `sceNp*` calls). `tools/install_trace_patch.py <rpcs3 folder>` adds or
+  removes the entry in `patches/patch.yml` (idempotent, keeps CRLF, writes a `.bak`).
+- `python tools/make_trace_patch.py --selftest` checks the encoding with capstone and the register-preservation and
+  logging semantics with a small built-in PPC emulator (mutation-tested; part of the repo selftest);
+  `--verify-elf EBOOT.ELF` checks every hook target on the real binary (first word `mflr r0`, second word `bl` to the
+  helper listed in the table); `--check` verifies that the committed YAML is up to date.
+- **Round 1** (18 hooks: invitation chain, `post_event` = every `EVENT_*`, NP handlers, SportsWorld ops) was verified
+  in real RPCS3 (see above). **Round 2** (39 hooks) adds: the OSDK trace function `0x2e8448` (prints `GSMR/SUCC`,
+  `GSMR/FAIL`, ... as 4CC pairs), `GameSessionManager::createGame`, the op constructor, `GameSession` ctor,
+  `setCurrentSession`, `SetPlayerAttribute`, the UI listener success/failure handlers, the Blaze
+  `NotifyGameSetup`/`onNetworkCreated`/`finalizeGameCreation` handlers and the match-up FSM (`0x4d087c`, `0x4cf708`,
+  `0x4d0aa4`, ...).
+- Install on **both** PCs (the friend's side shows whether anything arrives). If the game does not start after enabling
+  it, untick the patch in RPCS3's Patch Manager. The first launch after a patch change recompiles the PPU (minutes).
 
-**Zmiana w serwerze (niezweryfikowana na zywo): drabinka poziomow pierwszego `NotifyGameSetup`** (`gamemgr.LEVELS`,
-`gm_variant`, domyslnie 0 = auto):
-1. `1-stary-ksztalt` -- BAJT W BAJT jak stary przebieg (zweryfikowane diffem po zamaskowaniu id): PRE_GAME, obaj gracze
-   od razu w setupie (STAT=4), stare pola graczy i gry, REAS z tagiem VALU (unia pusta), follow-upy 0x74 x2 + 0x64;
-2. `+nowi-gracze` -- nowe pola rostera (CONG, CSID, DSUI, EXBL, LOC, NASP, PATT, TIME, UUID) i NotifyUserAdded;
-3. `+nowa-gra` -- GPVH, SEED, UUID, MNCP, PSAS, pelny HostInfo, MACI w adresach;
-4. `+nowy-REAS` -- host DLSC/CREATE, zaproszony IJGS;
-5. `+zaproszony-po-finalize` -- host sam w pierwszym setupie;
-6. `6-initializing` -- INITIALIZING + brak follow-upow (docelowy; tylko on daje 'gses' potrzebne do zaproszenia).
-Tryb auto: poziom 1 na start; kazdy `createGame`, ktory doszedl do `finalizeGameCreation` hosta, zwieksza poziom przy
-nastepnej probie; porazka (watchdog 14 s) cofa do najnowszego dzialajacego i usuwa gre (`NotifyGameRemoved`,
-`gm_watchdog_remove`), zeby host mogl ponowic bez restartu. Stan: `state/gm_variant.json`. W logu serwera:
-`POZIOM n`, `WATCHDOG ...`, `SUKCES poziomu n`. Dodatkowo identyfikatory graczy sa teraz < 2^31
-(`ids.uid_for`: 1.1e9..2.0e9) -- host `odyniec` mial wczesniej uid 2 999 187 369, a stary dzialajacy przebieg uzywal
-tylko wartosci < 2^31.
-**Diagnostyka pod jeden test:** `logs/session_*.log` (caly log konsoli), `logs/gm_attempts.log` (dziennik prob: kazde
-powiadomienie GameManager rozkodowane, kazde zadanie klientow z czasem w ms, wynik), sondy po 3/6/9 s gdy host milczy
-(`gm_probes`), flush przechwytow co 2 s, `collect_logs.ps1` pakuje to wszystko do jednego zip-a. Selftest 43/43.
+## Session 2026-10-11 (evening): host-only ladder, everything reaches `finalizeGameCreation`
 
-**Test 2026-10-11 (dwa przebiegi z drabinka; logi serwera + RPCS3 hosta `odyniec` i kolegi `odyniec1`):**
-- **Poziom 1 (bajt w bajt jak stary) doszedl do konca na OBU klientach**: i host, i kolega (`odyniec1`) wyslali
-  `updateMeshConnection` (STAT=2) oraz `finalizeGameCreation` w ciagu 0,2 s od setupu; oba zbindowaly UDP 3659/9999.
-  Potem host: lookup `odyniec1` + statystyki `MyFriendlies` (`EID=[0]`), i ~13,9 s po setupie `sceNpBasicSetPresence`
-  (64 B) -- kolega dostaje wtedy `basic_event: event:1 (PRESENCE)`. Zadnego `sceNpBasicSendMessageGui`
-  (zaproszenia) w zadnym z ~40 zebranych logow RPCS3.
-- **Drugi `createGame` (poziom 2) wywalil emulator hosta w OBU przebiegach** (takze po dodaniu usuwania starej gry):
-  `·F ... VM: Access violation reading location 0x0`, `FEThread`, PC `0x288ae0`, `Emulation has been frozen!`.
-  Pierwsza hipoteza (stara gra GID=1 zostala w kliencie) byla BLEDNA: `NotifyGameRemoved` przed setupem nic nie
-  zmienilo. Prawdziwa przyczyna to poziom 2: **klient nie uznal nikogo za hosta**.
-- **Jak klient rozpoznaje hosta (dekompilacja, `Game` ctor `0xc58c3c`, `addPlayer 0xc5844c`, `0xc6a4e0`):**
-  `isHost` (`Game::vt[0x64]`, `0xc57318`) = `Game+0x3ac == Game+0x42c`, tzn. punkt koncowy sieci hosta == MOJ punkt
-  koncowy. Punkty koncowe leza w mapie `mGameEndpointMap` kluczowanej CONG (`Game::vt[0x88] = 0xc573a8`).
-  * `Game+0x42c` (moj) = punkt koncowy mojego gracza z rostera (klucz = jego CONG) lub, w stanie INITIALIZING,
-    punkt koncowy zbudowany z THST {CONG, CSID, HNET}, gdy moj BlazeId == THST.HPID.
-  * `Game+0x3ac` (host): w stanie INITIALIZING/0x84/0x85 = ten punkt z THST; w innym stanie (np. PRE_GAME) =
-    punkt koncowy o kluczu **DHST.CONG** (pole `dedicatedServerHostInfo`; nieobecne => klucz 0).
-  * Uklad `GAME`: trzy kolejne `HostInfo` (rozmiar 0x38; w nim +0x10 HPID, +0x20 HSLT, +0x28 CONG, +0x30 CSID) pod
+**Test (`logs/gm_attempts.log` 13:34-13:38; host `odyniec`, friend `odyniec1`):**
+- 8 x `createGame`, levels 1-5 (host-only): **every one reached `finalizeGameCreation`, zero crashes** (the b015730 fix
+  works). `state/gm_variant.json` ends at level 5, all levels "good". On levels 3-5 (INITIALIZING) the host moves the
+  game to PRE_GAME itself with `advanceGameState` (cmd 0x0003) - normal behaviour.
+- After `finalizeGameCreation` the host always did the same, on every level: ~0.7 s later
+  `lookupUsersByPersonaNames(['odyniec1'])`, ~0.8 s `Stats::getStatsByGroupAsync` for group `MyFriendlies` with its OWN
+  EID, then **silence** (nothing on Blaze until the next manual attempt ~30 s later). The friend sends nothing (no
+  `joinGame`).
+- **Host RPCS3: zero `sceNpBasicSendMessageGui` calls** and no `sceNpLookup*` besides start-up initialisation
+  (`sceNpLookupInit/CreateTitleCtx`). The friend only sees `basic_event: event:1` (PRESENCE) and `event:0` (OFFLINE),
+  never `event:5`/`event:2`.
+- **Telemetry** (now readable: `logs/captures/telemetry_*.txt`, the content is plain text after TLS decryption). The only
+  events are `client_bugsentry` -> `ServerError`, `server_name:"SportsWorld"`, `server_type:"https"`,
+  `errid:"disconnect"`, repeated on EVERY `lookupUsersByPersonaNames` (host and friend, also after `createGame`).
+  SportsWorld = the EASW web service (config keys `OSDK_EASW_AUTH_URL/REQ_URL/MEDIA_URL/EVENT_URL/GF_FILE_URL`, module
+  `0x30eb10`, op `ConnectToSportsWorld` `0x309388`, `LoadSportsWorldUserPresence` `0x30f2f0`, `SendFriendsToSportsWorld`
+  `0x30f068`). The server does not provide these keys, so every request ends in "disconnect". (Cosmetic: `pid` in the
+  telemetry is the same for both players because `postAuth.UROP.UID` gets the host's constant.)
+
+**Invitation chain on PS3 (static analysis; the flag `UNK_025fbcd0` is only read, never written, = 0 => NP path):**
+Flash UI -> adaptor `OSDK_GameInvitationAdaptor` (`0x16491b4` SendGameInvite / `0x1649264` SendMultipleGameInvites;
+**they silently do nothing when module `ginv` is not registered**) -> module `ginv` (`0x301ad4`, registered by
+`0x302184` when `Invitations[5]==1`) -> op `SendGameInvite` (`0x3019a4`) -> manager `puid` (`0x2cd938`, op
+"LookupPlatformUserId": first the local friend list `0x2f8b50`/`0x27ea00`, only then `sceNpLookupNpIdAsync`) -> callback
+`0x30262c` -> `0x302454` (needs a current session from `gses` vt[0x24], otherwise returns error 4 without touching NP)
+-> `sceNpBasicSendMessageGui`. The only other caller of that import is `0x2f95c0` (a different one-recipient
+operation); `sceNpBasicSendMessage/Attachment` are never called.
+
+**Server changes of this session:** `MAX_PREGAME_TIMEOUT=120` in the client config (`OSDK_CORE_DEFAULTS`; the match-up
+FSM `0x4d087c` reads it, default 10 s - the host used to return to the menu after ~14 s, before a friend could accept an
+invitation). The telemetry stub now reads the whole request body (Content-Length) and logs it to the session log
+(`telemetry tresc: ...`).
+
+## Session 2026-10-11 (earlier): ladder test, crash analysis, the "isHost" model
+
+**Test (two runs with the ladder; server logs + RPCS3 of host `odyniec` and friend `odyniec1`):**
+- **Level 1 (byte-for-byte the old flow) completed on BOTH clients**: host and friend both sent `updateMeshConnection`
+  (STAT=2) and `finalizeGameCreation` within 0.2 s of the setup; both bound UDP 3659/9999. Then the host did a lookup of
+  `odyniec1` + `MyFriendlies` stats (`EID=[0]`) and, ~13.7-13.9 s after the setup, `sceNpBasicSetPresence` (64 B) - the
+  friend then receives `basic_event: event:1 (PRESENCE)`. No `sceNpBasicSendMessageGui` in any of the ~40 collected RPCS3
+  logs.
+- **The second `createGame` (level 2) crashed the host's emulator in BOTH runs** (also after adding removal of the old
+  game): `VM: Access violation reading location 0x0`, `FEThread`, PC `0x288ae0`, `Emulation has been frozen!`. Stack:
+  NotifyGameSetup handler `0xc6e0b8` -> `0xc6dad8` -> network start `0xcb98e8` -> `onNetworkCreated 0xc6a92c` ->
+  `0xc6a4e0` -> job-end callback `0xc71c44` -> `0x2dee08` (`GSMR SUCC`: creates the `GameSession` `0x2891e4` and
+  stores it in `gses`) -> `onPlayerAdded 0x288f8c` -> `0x288e58` -> `0x288a84`, which dereferences the result of
+  `0x2887d4` ("current game" from `gses`, or `gsmp` if missing) == NULL. The first hypothesis (a stale game GID=1 left in
+  the client) was **wrong**: `NotifyGameRemoved` before the setup changed nothing. The real cause is level 2 itself:
+  **the client did not consider anyone to be the host.**
+- **How the client decides who is the host (decompiled; `Game` ctor `0xc58c3c`, `addPlayer 0xc5844c`, `0xc6a4e0`):**
+  `isHost` (`Game::vt[0x64]`, `0xc57318`) = `Game+0x3ac == Game+0x42c`, i.e. the host's network endpoint == MY endpoint.
+  Endpoints live in the map `mGameEndpointMap` keyed by CONG (`Game::vt[0x88] = 0xc573a8`).
+  * `Game+0x42c` (mine) = the endpoint of my own roster player (key = its CONG) or, in state INITIALIZING, the endpoint
+    built from `THST {CONG, CSID, HNET}` when my BlazeId == `THST.HPID`.
+  * `Game+0x3ac` (host): in state INITIALIZING/0x84/0x85 = that endpoint from `THST`; in any other state (e.g. PRE_GAME) =
+    the endpoint with key **`DHST.CONG`** (field `dedicatedServerHostInfo`; absent => key 0).
+  * `GAME` layout: three consecutive `HostInfo` structs (size 0x38; +0x10 HPID, +0x20 HSLT, +0x28 CONG, +0x30 CSID) at
     `GAME+0xe0` = THST, `+0x118` = DHST, `+0x150` = PHST.
-  * Stary przebieg: nikt nie mial CONG (wszyscy klucz 0), wiec punkt koncowy 0 byl jednoczesnie "hostem" i "moim" u
-    KAZDEGO -- kolega tez uwazal sie za hosta i tez wysylal `finalizeGameCreation` (stad nic z zaproszenia).
-  * Poziom 2 nadal nie mial CONG w THST/DHST, ale roster mial niezerowe CONG => `isHost=false` u wszystkich =>
-    brak `updateMeshConnection`/`finalizeGameCreation`; `0xc6a4e0` konczy zadanie createGame od razu (callback
-    `0x2dee08`), a konstruktor sesji (`0x2891e4`) wywoluje `onPlayerAdded` dla lokalnego gracza w stanie 4 i
-    `0x2887d4` ("biezaca gra" z `gses`/`gsmp`) zwraca NULL => crash. Przy STAT=2 w setupie to wywolanie nie
-    nastepuje (dlatego dolaczajacy powinien miec STAT=2).
-  * Przebudowany przebieg 504829f (INITIALIZING, CONG spojne) nie crashowal, tylko stal 30 s (zadanie createGame
-    bez konca; porownaj 13,9 s w poziomie 1) -- przyczyna wciaz nieustalona (nie wiemy, czy siec "created" doszla).
-- **Zaproszenie**: PS3 uzywa sciezki NP (`UNK_025fbcd0 == 0` -> operacja `SendGameInvite` -> `sceNpBasicSendMessageGui`,
-  `0x301ad4`/`0x302454`), uruchamianej przez UI (skrypt Flash) po `EVENT_CREATEGAME_SUCCESS`
-  (`0x1624e1c`) -- host nigdy do niej nie doszedl. W starym przebiegu kolega byl od razu w setupie jako CONNECTED
-  i mial wlasna gre, co mogło wyłączyć krok zaproszenia.
-**Nowa drabinka (poziomy "host sam"; niezweryfikowana na zywo), `gamemgr.LEVELS`:** setup dostaje TYLKO host, kolega
-wchodzi dopiero po zaproszeniu przez `joinGame` (dostaje wtedy `NotifyGameSetup` z CONG i STAT=2, host zmiane
-stanu/`NotifyPlayerJoining`):
-1. `1-host-sam-stary` -- PRE_GAME, host bez CONG (klucz 0 = host, jak dzialalo), stare pola, REAS jak FIFA 14;
-2. `2-host-i-zarezerwowany-kolega` -- jak 1 + kolega z `PLJD` w rosterze hosta jako ZAREZERWOWANY (STAT=0, z CONG);
-3. `3-host-sam-initializing` -- INITIALIZING + spojny CONG hosta (roster = THST = PHST), po finalize PRE_GAME;
-4. `4-host-laczy-sie` -- jak 3 + host w setupie STAT=2, po finalize serwer oglasza go jako CONNECTED;
-5. `5-docelowy` -- jak 4 + zarezerwowany kolega + nowe pola graczy i gry + REAS DLSC/CREATE.
-Auto: start od 1; po `finalizeGameCreation` hosta kolejny `createGame` bierze nastepny poziom; po pierwszej porazce raz
-cel (5), potem najlepszy dzialajacy; rozlaczenie klienta w trakcie proby (crash) nie liczy sie jako porazka, powtarza
-poziom (2 razy). Przed nowa gra serwer usuwa stare gry hosta (`NotifyGameRemoved`). Plik stanu ma wersje 3.
-`gm_attempts.log` loguje juz bez limitu czasu kazde zadanie GameManager i Messaging (joinGame kolegi po zaakceptowaniu
-zaproszenia moze przyjsc minute po createGame). Selftest 56/56.
+  * Old flow: nobody had a CONG (all key 0), so endpoint 0 was both "host" and "mine" on EVERY client - the friend also
+    thought it was the host and also sent `finalizeGameCreation` (hence no invitation step).
+  * Level 2 still had no CONG in THST/DHST but non-zero CONGs in the roster => `isHost=false` everywhere => no
+    `updateMeshConnection`/`finalizeGameCreation`; `0xc6a4e0` finishes the createGame job immediately (callback `0x2dee08`),
+    the session constructor (`0x2891e4`) calls `onPlayerAdded` for the local player in state 4, and `0x2887d4` returns NULL
+    => crash. With STAT=2 in the setup that call does not happen (so a joining player should have STAT=2).
+  * The rebuilt flow 504829f (INITIALIZING, consistent CONG) did not crash but stood still for 30 s (createGame job never
+    ended; compare 13.9 s on level 1) - cause still unknown (we do not know whether the "network created" callback fired).
+- **Invitation**: PS3 uses the NP path (`UNK_025fbcd0 == 0` -> op `SendGameInvite` -> `sceNpBasicSendMessageGui`,
+  `0x301ad4`/`0x302454`), started by the UI (Flash script) after `EVENT_CREATEGAME_SUCCESS` (`0x1624e1c`) - the host never
+  got there. In the old flow the friend was immediately in the setup as CONNECTED and had its own game, which may have
+  disabled the invitation step.
 
-## Latest session: 2026-10-09 wieczor (pierwszy test na zywo po przebudowie GameManager)
+**Host-only ladder (`gamemgr.LEVELS`)** - only the host gets a setup; the friend joins later through `joinGame` (then gets
+a `NotifyGameSetup` with CONG and STAT=2, the host gets a state change / `NotifyPlayerJoining`):
+1. `1-host-sam-stary` (host alone, old shape) - PRE_GAME, host without CONG (key 0 = host, as it used to work), old fields, REAS as in FIFA 14;
+2. `2-host-i-zarezerwowany-kolega` (host + reserved friend) - like 1 + the friend from `PLJD` in the host's roster as RESERVED (STAT=0, with CONG);
+3. `3-host-sam-initializing` (host alone, INITIALIZING) - INITIALIZING + consistent host CONG (roster = THST = PHST), PRE_GAME after finalize;
+4. `4-host-laczy-sie` (host is "connecting") - like 3 + host STAT=2 in the setup, after finalize the server announces it as CONNECTED;
+5. `5-docelowy` (target shape) - like 4 + reserved friend + new player and game fields + REAS DLSC/CREATE.
+Auto mode: start at 1; after a host `finalizeGameCreation` the next `createGame` takes the next level; after the first
+failure the target level (5) is tried once, then the best working one; a client disconnect during an attempt (crash) does
+not count as a failure, the level is repeated (twice). Before a new game the server removes the host's old games
+(`NotifyGameRemoved`). The state file is version 3 (`state/gm_variant.json`). Pin a level with `"gm_variant": N` (1-5) in
+`config.json`; `-1` switches to the individual `gm_*` toggles. Player ids are now < 2^31 (`ids.uid_for`: 1.1e9..2.0e9) -
+host `odyniec` used to get uid 2 999 187 369 while the old working flow only used values < 2^31.
 
-**Wynik testu (host `odyniec` + kolega `odyniec1`, Radmin, logi serwera i obu RPCS3):**
-- Logowanie, lookup persony, `listEntitlements`, `Messaging::fetchMessages/getMessages` i Stats dzialaja u obu.
-- Host wyslal `createGame` (PLJD: wlasny CGID `(30722,2,uid)` odeslany poprawnie, zarezerwowany kolega z
-  unikalnym uid) -> serwer odpowiedzial `CreateGameResponse GID=1` + `NotifyGameSetup` (DLSC/CREATE, GSTA=1,
-  host STAT=2). Klient hosta po tym zbindowal UDP **3659 i 9999** (czyli zaczal tworzyc siec gry), ale
-  **NIE wyslal ani `updateMeshConnection`, ani `finalizeGameCreation`** i nie wywolal `sceNpBasicSendMessageGui`;
-  po ok. minucie uzytkownik zamknal emulator. Kolega nie dostal nic (zaproszony dolacza dopiero po finalize).
-- **To jest REGRESJA wzgledem ostatniego testu na zywo (commit 2c9842c):** tam ten sam lancuch dochodzil do
-  `finalizeGameCreation`. Stary setup mial GSTA=130 (PRE_GAME), obu graczy z STAT=4, REAS nieustawiona (zly tag
-  VALU = unia pusta) oraz osobne `GamePlayerStateChange` x2 + `GameStateChange`. Nowy ma GSTA=1, tylko hosta ze
-  STAT=2, REAS=DLSC i brak follow-upow.
+**Diagnostics for a single test:** `logs/session_*.log` (whole console log), `logs/gm_attempts.log` (attempt journal: every
+GameManager notification decoded, every client request with a millisecond timestamp, result; GameManager and Messaging
+requests are logged without time limit because the friend's `joinGame` can arrive a minute after `createGame`), probes at
+3/6/9 s if the host stays silent (`gm_probes`), capture flush every 2 s, `collect_logs.ps1` zips everything.
 
-**Co ustalila dekompilacja w tej sesji (adresy w EBOOT FIFA 17 PS3):**
-- `0xc6e0b8` = handler NotifyGameSetup: znajduje zadanie createGame po (indeks uzytkownika, GID), tworzy `Game`
-  (`0xc69ed0` -> ctor `0xc58c3c`), potem `0xc6dad8` -> `0xc60028` odpala tworzenie sieci gry. Wynik sieci wraca do
-  `0xc6a92c` (onNetworkCreated) -> `0xc6a4e0`, ktore dla hosta wysyla `finalizeGameCreation` (`0xc6a204`), a dla
-  dolaczajacego `updateMeshConnection STAT=2` (`0xc59f14`). `updateMeshConnection` hosta nie wysyla.
-- Odpowiedz na finalize (`0xc6bf74`) konczy zadanie createGame sukcesem, gdy `0xc5b8c0` zwroci prawde
-  (dla REAS nieustawionej i DLSC z DCTX!=3 -- tak). Dopiero wtedy FE moze wyslac zaproszenie.
-- Wysylka zaproszenia (`0x302454`) wymaga biezacej sesji w komponencie `gses`; bez niej zwraca blad bez wywolania
-  `sceNpBasicSendMessageGui`. Kod FIFA ustawia id gry dla hosta w obsludze stanu INITIALIZING, wiec sam stary
-  przebieg (od razu PRE_GAME) mogl dojsc do konca createGame, ale nie do zaproszenia.
-- `isHost` w `Game` = (BlazeId z THST/PHST.HPID == BlazeId zalogowanego uzytkownika z listy lokalnych graczy);
-  `vtable[0x28]` gry zwraca id hosta topologii (`Game+0x1b8`), a handler NotifyGameSetup wraca bez dzialania, gdy to 0.
-- Obserwacja: naglowek `Easw-Session-Data-Nucleus-Id` (POW, `0x51c1e4`) mial u hosta id KOLEGI (2028699422), u kolegi
-  jego wlasne. FIFA pobiera je z innego kontenera uzytkownikow niz lista graczy lokalnych (hipoteza: pierwszy/min id).
-  Nie wplywa na GameManager (tam porownanie idzie po liscie lokalnych), ale warto pamietac przy FUT/POW.
+## Session 2026-10-09 (evening): first live test after the GameManager rebuild
 
-**Test 2026-10-10 (logi RPCS3 hosta i kolegi, bez logu serwera):** nadal brak polaczenia. W logu hosta jest jedna
-para `bind` UDP 3659/9999 (jedno `createGame`), potem nic -- zadnego `sceNpBasicSendMessageGui`; u kolegi nie bylo
-bindu 9999, wiec nie dostal zadnego setupu (zaproszony dostaje setup dopiero po `finalizeGameCreation` hosta).
-`NPHandler: basic_event: event:0` to u RPCS3 OFFLINE znajomego (1 = presence, 5 = zaproszenie), nie wiadomosc.
-Logi RPCS3 hosta ze starego (2026-10-08) i nowego przebiegu sa prawie identyczne -- rozstrzyga tylko log serwera.
-**Z archiwalnego logu serwera (stary przebieg, 2026-10-08 22:02 UTC):** po setupie host wysylal OD RAZU
-`updateMeshConnection` (STAT=2, TCG=(30722,2,0)) i `finalizeGameCreation`, potem FE robil lookup kolegi i statystyki
-`MyFriendlies` i wracal do poprzedniego ekranu bez zaproszenia (czyli createGame konczyl sie sukcesem).
+**Result (host `odyniec` + friend `odyniec1`, Radmin, server logs and both RPCS3 logs):**
+- Login, persona lookup, `listEntitlements`, `Messaging::fetchMessages/getMessages` and Stats work on both.
+- The host sent `createGame` (PLJD: its own CGID `(30722,2,uid)` echoed correctly, the friend reserved with a unique uid)
+  -> the server answered `CreateGameResponse GID=1` + `NotifyGameSetup` (DLSC/CREATE, GSTA=1, host STAT=2). The host's
+  client then bound UDP **3659 and 9999** (it started creating the game network) but sent **neither
+  `updateMeshConnection` nor `finalizeGameCreation`** and never called `sceNpBasicSendMessageGui`; the user closed the
+  emulator after about a minute. The friend received nothing (an invitee joins only after finalize).
+- **This was a REGRESSION against the last live test (commit 2c9842c)** where the same chain reached
+  `finalizeGameCreation`. The old setup had GSTA=130 (PRE_GAME), both players with STAT=4, REAS unset (wrong tag VALU =
+  empty union) and separate `GamePlayerStateChange` x2 + `GameStateChange`. The new one had GSTA=1, only the host with
+  STAT=2, REAS=DLSC and no follow-ups.
 
-**Zmiana w serwerze (niezweryfikowana na zywo): drabinka poziomow pierwszego `NotifyGameSetup`** (`gamemgr.LEVELS`,
-`gm_variant`, domyslnie 0 = auto):
-1. `1-stary-ksztalt` -- BAJT W BAJT jak stary przebieg (zweryfikowane diffem po zamaskowaniu id): PRE_GAME, obaj gracze
-   od razu w setupie (STAT=4), stare pola graczy i gry, REAS z tagiem VALU (unia pusta), follow-upy 0x74 x2 + 0x64;
-2. `+nowi-gracze` -- nowe pola rostera (CONG, CSID, DSUI, EXBL, LOC, NASP, PATT, TIME, UUID) i NotifyUserAdded;
-3. `+nowa-gra` -- GPVH, SEED, UUID, MNCP, PSAS, pelny HostInfo, MACI w adresach;
-4. `+nowy-REAS` -- host DLSC/CREATE, zaproszony IJGS;
-5. `+zaproszony-po-finalize` -- host sam w pierwszym setupie;
-6. `6-initializing` -- INITIALIZING + brak follow-upow (docelowy; tylko on daje 'gses' potrzebne do zaproszenia).
-Tryb auto: poziom 1 na start; kazdy `createGame`, ktory doszedl do `finalizeGameCreation` hosta, zwieksza poziom przy
-nastepnej probie; porazka (watchdog 14 s) cofa do najnowszego dzialajacego i usuwa gre (`NotifyGameRemoved`,
-`gm_watchdog_remove`), zeby host mogl ponowic bez restartu. Stan: `state/gm_variant.json`. W logu serwera:
-`POZIOM n`, `WATCHDOG ...`, `SUKCES poziomu n`. Dodatkowo identyfikatory graczy sa teraz < 2^31
-(`ids.uid_for`: 1.1e9..2.0e9) -- host `odyniec` mial wczesniej uid 2 999 187 369, a stary dzialajacy przebieg uzywal
-tylko wartosci < 2^31.
-**Diagnostyka pod jeden test:** `logs/session_*.log` (caly log konsoli), `logs/gm_attempts.log` (dziennik prob: kazde
-powiadomienie GameManager rozkodowane, kazde zadanie klientow z czasem w ms, wynik), sondy po 3/6/9 s gdy host milczy
-(`gm_probes`), flush przechwytow co 2 s, `collect_logs.ps1` pakuje to wszystko do jednego zip-a. Selftest 43/43.
+**What decompilation established (addresses in the FIFA 17 PS3 EBOOT):**
+- `0xc6e0b8` = NotifyGameSetup handler: finds the createGame job by (user index, GID), creates the `Game` (`0xc69ed0` ->
+  ctor `0xc58c3c`), then `0xc6dad8` -> `0xc60028` starts the game network. The network result returns to `0xc6a92c`
+  (onNetworkCreated) -> `0xc6a4e0`, which for the host sends `finalizeGameCreation` (`0xc6a204`) and for a joiner
+  `updateMeshConnection STAT=2` (`0xc59f14`). The host sends no `updateMeshConnection`.
+- The finalize reply (`0xc6bf74`) completes the createGame job with success when `0xc5b8c0` returns true (for unset REAS and
+  DLSC with DCTX!=3 - it does). Only then can the front end send the invitation.
+- Sending the invitation (`0x302454`) needs a current session in the `gses` component; without it it returns an error
+  without calling `sceNpBasicSendMessageGui`. FIFA sets the host's game id in the INITIALIZING handler, so the old flow
+  (straight to PRE_GAME) could finish createGame but not reach the invitation.
+- `isHost` in `Game` = (BlazeId from THST/PHST.HPID == BlazeId of the logged-in user from the local player list);
+  `vtable[0x28]` of the game returns the topology host id (`Game+0x1b8`) and the NotifyGameSetup handler returns without
+  doing anything when that is 0. (Refined on 2026-10-11, see the isHost model above.)
+- Observation: the header `Easw-Session-Data-Nucleus-Id` (POW, `0x51c1e4`) carried the FRIEND's id (2028699422) on the
+  host and its own on the friend. FIFA takes it from a different user container than the local player list (hypothesis:
+  first/minimum id). It does not affect GameManager, but remember it for FUT/POW.
 
-**Test 2026-10-11 (pierwszy z drabinka; logi serwera + RPCS3 hosta `odyniec` i kolegi `odyniec1`):**
-- **Poziom 1 (bajt w bajt jak stary) doszedl do konca na OBU klientach**: i host, i kolega (`odyniec1`) wyslali
-  `updateMeshConnection` (STAT=2) oraz `finalizeGameCreation` w ciagu 0,2 s od setupu; oba zbindowaly UDP 3659/9999.
-  Potem host: lookup `odyniec1` + statystyki `MyFriendlies` (`EID=[0]`), i ~13,7 s po setupie `sceNpBasicSetPresence`
-  (64 B) -- kolega dostaje wtedy `basic_event: event:1 (PRESENCE)` i sam robi lookup `odyniec`. Zadnego
-  `sceNpBasicSendMessageGui` (zaproszenia) nadal nie ma -- identycznie jak w starym przebiegu z 2026-10-08.
-- **Drugi `createGame` (poziom 2) wywalil emulator hosta**: `·F ... VM: Access violation reading location 0x0`,
-  `FEThread`, PC `0x288ae0`, potem `Emulation has been frozen!` (u kolegi bez crasha). Stos: handler NotifyGameSetup
-  `0xc6e0b8` -> `0xc6dad8` -> start sieci `0xcb98e8` -> `onNetworkCreated 0xc6a92c` -> `0xc6a4e0` -> callback konca
-  zadania (`0xc71c44`) -> `0x2dee08` (log `GSMR SUCC`: tworzy `GameSession` `0x2891e4` i ustawia ja w `gses`) ->
-  `onPlayerAdded 0x288f8c` -> `0x288e58` -> `0x288a84`, ktore dereferuje wynik `0x2887d4` ("biezaca gra" z `gses`,
-  a gdy brak -- z `gsmp`) == NULL. **Przyczyna to nie kształt poziomu 2, tylko STARA GRA**: po sukcesie poziomu 1
-  gra GID=1 zostala na serwerze (i w kliencie), wiec setup GID=2 kazal klientowi rozebrac GID=1 w trakcie tworzenia
-  GID=2 (host wyslal `removePlayer GID=1 PID=odyniec1 REAS=7` i `updateMeshConnection GID=1 STAT=0` ze smieciowym
-  `FLGS=0xCDCDCDCD`, zamknal gniazdo UDP 9999 starej gry) i zostal bez biezacej gry. Wczesniejsze crashe
-  (`0x2ef598`, odczyt `0x90`; 26.09 i 08.10 wieczorem) to INNY blad.
-- Poziom 2 nie zostal wiec naprawde przetestowany (kolega przy tym samym setupie tez nie wyslal `finalizeGameCreation`,
-  ale oba klienty rozbieraly wtedy stara gre).
-**Poprawki (niezweryfikowane na zywo):** (1) kazdy nowy `createGame` hosta najpierw usuwa jego wczesniejsze gry
-(`NotifyGameRemoved` do wszystkich czlonkow, przed nowym setupem; `gamemgr._retire_stale_locked`); (2) rozlaczenie
-klienta hosta w trakcie proby (crash/zamkniecie okna, takze po werdykcie watchdoga w ciagu 120 s) NIE liczy sie jako
-porazka poziomu -- ten sam poziom jest powtarzany, dopiero drugie takie rozlaczenie oznacza go jako nieudany
-(`result: crash`, `crashes` w `state/gm_variant.json`); (3) plik stanu ma wersje (`v: 2`) -- stary wynik "poziom 2
-nieudany" jest ignorowany, drabinka startuje od poziomu 1; (4) watchdog = 14 s. Selftest 48/48.
+**Test 2026-10-10 (RPCS3 logs of host and friend, no server log):** still no connection. The host log has one UDP 3659/9999
+`bind` pair (one `createGame`), then nothing - no `sceNpBasicSendMessageGui`; the friend had no bind of 9999, so no setup
+(an invitee gets its setup only after the host's `finalizeGameCreation`). `NPHandler: basic_event: event:0` is RPCS3's
+OFFLINE of a friend (1 = presence, 5 = invitation), not a message. The RPCS3 logs of the old (2026-10-08) and new runs are
+almost identical - only the server log decides. **From the archived server log (old flow, 2026-10-08 22:02 UTC):** after the
+setup the host sent `updateMeshConnection` (STAT=2, TCG=(30722,2,0)) and `finalizeGameCreation` IMMEDIATELY, then the front end
+looked up the friend and the `MyFriendlies` stats and returned to the previous screen without an invitation (so createGame
+succeeded).
 
-## Latest session: 2026-10-09 (analiza dekompilatorem, przebudowa GameManager)
+**Fixes after the first ladder run (unverified on a live client at the time):** (1) every new host `createGame` first removes
+the host's earlier games (`NotifyGameRemoved` to all members, before the new setup; `gamemgr._retire_stale_locked`);
+(2) a host client disconnect during an attempt (crash / closed window, also within 120 s after the watchdog verdict) does NOT
+count as a level failure - the same level is repeated, only the second such disconnect marks it as failed
+(`result: crash`, `crashes` in `state/gm_variant.json`); (3) the state file is versioned - an old "level 2 failed" result is
+ignored; (4) watchdog = 14 s.
 
-Dekompilacja EBOOT (Ghidra headless) pokazala konkretne bledy naszych odpowiedzi GameManager; wszystkie
-poprawione w kodzie (`gamemgr.py`, `ids.py`, `messaging.py`), NIEZWERYFIKOWANE na zywym kliencie:
-- **Unia REAS (GameSetupReason)**: w FIFA 17 skladowe maja rozne tagi (DLSC, IJGS, IMSC, MMSC, RDSC), a numer
-  na drucie = pozycja w tablicy posortowanej po tagu (DLSC=0, IJGS=1, IMSC=2, MMSC=3, RDSC=4). Dekoder unii
-  (0xcd0bc8) przy niezgodnym tagu zostawia unie PUSTA. Wczesniej slalismy tag VALU (FIFA 14), a zaproszonemu
-  numer 2 (= IndirectMatchmaking!). Teraz host: DLSC{DCTX=0}, zaproszony: IJGS{RPVC=0}.
-- **CONG (id grupy polaczen)**: klient trzyma punkty koncowe sieci pod kluczem ReplicatedGamePlayer.CONG i NIE
-  laczy sie z graczem, ktorego CONG rowna sie jego wlasnemu (0xc5e22c, 0xc5e958, 0xc5eaec). Mielismy CONG=0 u
-  wszystkich => brak ruchu UDP miedzy graczami. Teraz kazdy gracz ma unikalne CONG (= jego BlazeId), takie
-  samo w rosterze, HostInfo {CONG,CSID,HPID,HSES,HSLT} i w UserAuthenticated.CGID (ObjectId (30722,2,id)).
-- **Unikalne ID graczy** (ids.py) zamiast wspolnego LOCAL_USER_ID z widokiem "per klient".
-- Pola TimeValue (TIME) maja typ TDF 11; usuniete HSES z ReplicatedGameData; dodane GPVH/SEED/UUID/MNCP/PSAS.
-- Sukces createGame u hosta przychodzi dopiero z ODPOWIEDZIA na finalizeGameCreation (0xc6bf74) -- serwer
-  odpowiada pusto bez bledu (OK). Potem FE wysyla zaproszenie przez NP: 'gses' musi miec biezaca sesje gry,
-  potem sceNpBasicSendMessageGui z id gry (0x302454). W logach hosta tego wywolania nadal nie ma.
-- Nowe: Authentication::listEntitlements (ACTIVE na grupe), Messaging (skrzynka), removePlayer/destroyGame/joinGame,
-  NotifyUserAdded dla graczy gry. Przelaczniki w config.py (`gm_*`, `serve_entitlements`, `serve_messaging`).
+## Session 2026-10-09: decompiler analysis, GameManager rebuild
 
-## Latest session: 2026-10-08 (read this first)
+Decompiling the EBOOT (Ghidra headless) exposed concrete errors in our GameManager replies; all fixed in code
+(`gamemgr.py`, `ids.py`, `messaging.py`), UNVERIFIED on a live client at the time:
+- **REAS union (GameSetupReason)**: in FIFA 17 the members have different tags (DLSC, IJGS, IMSC, MMSC, RDSC) and the wire
+  number is the position in the table sorted by tag (DLSC=0, IJGS=1, IMSC=2, MMSC=3, RDSC=4). The union decoder (`0xcd0bc8`)
+  leaves the union EMPTY on a tag mismatch. We used to send tag VALU (FIFA 14) and number 2 (= IndirectMatchmaking!) to the
+  invitee. Now the host gets DLSC{DCTX=0} and the invitee IJGS{RPVC=0}.
+- **CONG (connection group id)**: the client keeps network endpoints under `ReplicatedGamePlayer.CONG` and does NOT connect to a
+  player whose CONG equals its own (`0xc5e22c`, `0xc5e958`, `0xc5eaec`). We had CONG=0 for everybody => no UDP between
+  players. Now every player has a unique CONG (= its BlazeId), identical in the roster, in `HostInfo
+  {CONG,CSID,HPID,HSES,HSLT}` and in `UserAuthenticated.CGID` (ObjectId (30722,2,id)).
+- **Unique player ids** (`ids.py`) instead of one shared `LOCAL_USER_ID`, with a per-client view.
+- `TimeValue` (TIME) fields have TDF type 11; `HSES` removed from `ReplicatedGameData`; `GPVH/SEED/UUID/MNCP/PSAS` added.
+- On the host the createGame success arrives only with the REPLY to `finalizeGameCreation` (`0xc6bf74`) - the server answers
+  empty without an error (OK). Then the front end sends the invitation through NP: `gses` must hold a current game session,
+  then `sceNpBasicSendMessageGui` with the game id (`0x302454`).
+- New: `Authentication::listEntitlements` (ACTIVE per group), Messaging (mailbox), removePlayer/destroyGame/joinGame,
+  NotifyUserAdded for the players of a game. Toggles in `config.py` (`gm_*`, `serve_entitlements`, `serve_messaging`).
+
+## Session 2026-10-08 (read this first for the history)
 
 **Goal:** get two real players (two PCs, RPCS3, Radmin VPN) past "Sending match invite and creating a
 game session. Please wait..." in Online Friendlies and into a match. **Not achieved yet** — the
 host still waits after `createGame`. Everything below is pushed to `main`; none of the newest
-server changes has been run on a live client yet (only a local two-client simulation).
+server changes had been run on a live client yet (only a local two-client simulation).
 
 **Verified this session**
 - Client crash after a populated `lookupUsersByPersonaNames` reply was caused by a wrong `UserData`
@@ -287,7 +269,7 @@ server changes has been run on a live client yet (only a local two-client simula
   the same PID, and treats players joining a game that is not yet in PRE_GAME as deferred.
 
 **Changes pushed (all unverified on a live client, each has a `config.json` switch — see
-`TEST_PLAN.md`)**
+`TEST_PLAN.md`, which is in Polish)**
 - `gm_deferred_pregame` (default on): game starts in INITIALIZING(1); PRE_GAME(130) is sent only after
   the host's `finalizeGameCreation`.
 - `gm_faithful_flow` (default on): host gets `NotifyGameSetup` alone; the invitee gets its setup
@@ -298,101 +280,100 @@ server changes has been run on a live client yet (only a local two-client simula
   all players of the game.
 
 **Still unknown:** what exactly makes the client raise `EVENT_CREATEGAME_SUCCESS` for the host, and
-how the game sends the actual invitation to the friend. Next step if the host still hangs: follow
-`TEST_PLAN.md`, then capture UDP 3659/9999 with Wireshark on the Radmin adapter.
+how the game sends the actual invitation to the friend (see the 2026-10-11 sessions above for the
+current state).
 
-### Rejestracja przy kazdym starcie -- przyczyna i poprawka (2026-10-08)
-Z przechwytu: po loginie klient wysyla `Util::userSettingsLoad` (0x0009/0x000A) z kluczem `FirstTimeFlag`;
-pusta odpowiedz = "pierwsze logowanie" -> ekran powitalny/opt-in (`localizeStrings`, `getEmailOptInSettings`
-0x0001/0x00F2, `getAccount`, `updateAccount` 0x0014 z OPT1/OPT3), a na koncu klient zapisuje
-`userSettingsSave` (0x000B) `FirstTimeFlag='0'`. Serwer ignorowal zapis, wiec rejestracja wracala. Teraz
-`fifa17srv/usersettings.py` zapisuje ustawienia do `state/user_settings.json` (klucz = nazwa persony) i
-zwraca je w Load/LoadAll. Wylaczenie: `"persist_user_settings": false`. Po pierwszej rejestracji kolejne
-uruchomienia powinny ja pomijac. (Nie rozwiazuje to paska "EA servers not available" w rogu menu.)
+### Registration on every start - cause and fix (2026-10-08)
+From a capture: after login the client sends `Util::userSettingsLoad` (0x0009/0x000A) with key `FirstTimeFlag`; an
+empty reply means "first login" -> welcome / opt-in screen (`localizeStrings`, `getEmailOptInSettings` 0x0001/0x00F2,
+`getAccount`, `updateAccount` 0x0014 with OPT1/OPT3), and at the end the client saves `userSettingsSave` (0x000B)
+`FirstTimeFlag='0'`. The server ignored the save, so the registration came back every time. Now
+`fifa17srv/usersettings.py` stores the settings in `state/user_settings.json` (key = persona name) and returns them in
+Load/LoadAll. Disable with `"persist_user_settings": false`. After the first registration later runs should skip it.
+(This does not fix the "EA servers not available" bar in the corner of the menu.)
 
-### Baner "...servers are unavailable at this time" -- hipoteza i eksperyment (2026-10-08)
-Zrzut ekranu: u gory przewija sie "...rs are unavailable at this time. Please try again late(r)", a kafel
-Catalogue mowi "Connect to the EAS FC servers". Z EBOOT: za to odpowiada `POWService` (klasa pod 0x2314c0,
-tick 0x236178) -- usluga EASFC/EASW po HTTP (naglowki `EASW-Session`, `EASW-Token`, `EASW-Nucleus-Persona`).
-Jej adres pochodzi z kluczy konfiguracji serwera `FIFA_POW_URL` / `FIFA_POW_CONTENT_SERVER_URL` (kod 0x232550);
-gdy ich brak, adres jest pusty -- dokladnie to widac w RPCS3 jako `DnsHook: DNS query for ` (pusta nazwa) po
-zalogowaniu. Serwer dodaje teraz te klucze do odpowiedzi fetchClientConfig i ma atrape HTTP na portach
-8094 / 8080 (`pow_stub.py`), ktora tylko NAGRYWA zadania (logs/captures/pow_*.txt). To jeszcze nie jest
-prawdziwa usluga -- celem jest poznanie protokolu. Wylaczenie: `"serve_pow_config": false`.
-**Uwaga (2026-10-09): hipoteza "pusty adres POW = pusta nazwa w DNS" nie potwierdzila sie -- patrz
-sekcja ponizej.**
-(Mapa CONF w fetchClientConfig jest teraz sortowana po kluczu.)
+### Banner "...servers are unavailable at this time" - hypothesis and experiment (2026-10-08)
+Screenshot: the top of the screen scrolls "...rs are unavailable at this time. Please try again late(r)", and the Catalogue
+tile says "Connect to the EAS FC servers". From the EBOOT: `POWService` (class at 0x2314c0, tick 0x236178) is responsible - an
+EASFC/EASW service over HTTP (headers `EASW-Session`, `EASW-Token`, `EASW-Nucleus-Persona`). Its address comes from the
+server config keys `FIFA_POW_URL` / `FIFA_POW_CONTENT_SERVER_URL` (code 0x232550); when they are missing the address is empty -
+exactly what RPCS3 shows as `DnsHook: DNS query for ` (empty name) after login. The server now adds these keys to the
+fetchClientConfig reply and has an HTTP stub on ports 8094 / 8080 (`pow_stub.py`) that only RECORDS requests
+(logs/captures/pow_*.txt). It is not a real service yet - the goal is to learn the protocol. Disable with
+`"serve_pow_config": false`. **Note (2026-10-09): the hypothesis "empty POW address = empty DNS name" was not confirmed - see
+the section below.** (The CONF map in fetchClientConfig is now sorted by key.)
 
-### Baner EAS FC -- nowe ustalenia (2026-10-08, wieczor)
-Test z `FIFA_POW_URL` w konfiguracji NIE zmienil banera i klient nie polaczyl sie z portami 8094/8080 (patrz
-log: nadal `DnsHook: DNS query for ` z pusta nazwa), wiec POW nie byl przyczyna. Baner zmienia sie sam po
-chwili z "The EAS FC servers are unavailable..." na "PRESS THE START BUTTON TO RE-CONNECT" -- przy otwartym
-polaczeniu Blaze (RPCS3 zamyka je dopiero po wcisnieciu START). Odkrycia z EBOOT:
-- `Util` komenda 8 to **postAuth** (zadanie {DSUI, MAC, UDID}, odpowiedz {TELE, TICK, UROP}); serwer odpowiadal
-  pusto, wiec klient nie dostawal adresu serwera **ticker** (gorny pasek) ani telemetrii. Komenda 5 to
-  getTelemetryServer. Teraz oba sa obslugiwane (wartosci z dzialajacego serwera FIFA 14 Impulsum14).
-- Komponent **0x08C9 to OSDKSettings** (fetchSettings = 1, fetchSettingsGroups = 2), a nie "Seasons".
-- Modul konfiguracji klienta ("scfg") trzyma grupy OSDK_CORE/CLIENT/NUCLEUS/WEBOFFER/ABUSE_REPORTING/TICKER
-  z fetchClientConfig. Dodano klucze OSDK_PEERBUFFERSIZE, OSDK_MAXGAMES, OSDK_MATCHUP_TIMEOUT itd.
-- Atrapa TCP na porcie 6776 (ticker) nagrywa, co klient wysyla (logs/captures/ticker_*.txt).
-Przelaczniki: `serve_post_auth`, `serve_osdk_core_defaults`, `serve_pow_config`.
+### EAS FC banner - new findings (2026-10-08, evening)
+The test with `FIFA_POW_URL` in the config did NOT change the banner and the client did not connect to ports 8094/8080 (log:
+still `DnsHook: DNS query for ` with an empty name), so POW was not the cause. After a while the banner changes by itself
+from "The EAS FC servers are unavailable..." to "PRESS THE START BUTTON TO RE-CONNECT" - with the Blaze connection open (RPCS3
+closes it only after START is pressed). Findings from the EBOOT:
+- `Util` command 8 is **postAuth** (request {DSUI, MAC, UDID}, reply {TELE, TICK, UROP}); the server used to answer empty,
+  so the client never got the address of the **ticker** server (top bar) or of telemetry. Command 5 is getTelemetryServer.
+  Both are served now (values from the working FIFA 14 server Impulsum14).
+- Component **0x08C9 is OSDKSettings** (fetchSettings = 1, fetchSettingsGroups = 2), not "Seasons".
+- The client config module ("scfg") holds the groups OSDK_CORE/CLIENT/NUCLEUS/WEBOFFER/ABUSE_REPORTING/TICKER from
+  fetchClientConfig. Keys OSDK_PEERBUFFERSIZE, OSDK_MAXGAMES, OSDK_MATCHUP_TIMEOUT, ... were added.
+- A TCP stub on port 6776 (ticker) records what the client sends (logs/captures/ticker_*.txt).
+Toggles: `serve_post_auth`, `serve_osdk_core_defaults`, `serve_pow_config`.
 
-### Baner EAS FC -- analiza EBOOT i log z `postAuth` (2026-10-09)
-Test commita `47a874d` (postAuth + ticker + klucze OSDK): baner **bez zmian**, klient **nie polaczyl sie** z
-portem 6776 (ticker) ani 8094/8080 (POW). Hipotezy "ticker" i "POW URL" odpadaja jako przyczyna banera.
+### EAS FC banner - EBOOT analysis and the `postAuth` log (2026-10-09)
+Test of commit `47a874d` (postAuth + ticker + OSDK keys): banner **unchanged**, the client **did not connect** to port 6776
+(ticker) or 8094/8080 (POW). The "ticker" and "POW URL" hypotheses are ruled out as the cause of the banner.
 
-**Potwierdzone w EBOOT (kod, nie zgadywanie):**
-- Baner w rogu to maszyna stanow `POWService` (EASFC). Funkcja `0x15cc554` (SetStatus) wybiera tekst z
-  tablicy {`TXT_EASFC_SERVER_ERROR`, `TXT_EASFC_PLEASE_SIGN_IN`, `TXT_EASFC_RECONNECTING`}; podtytul
-  `TXT_EASFC_RECONNECT_PROMPT` ("PRESS START TO RE-CONNECT") pojawia sie dopiero, gdy flaga `POW+0x2670`
-  jest ustawiona -- robi to tick POW (0x236178) po uplywie `POW_RECONNECT_TIMER_MS` (domyslnie 5000) **i tylko
-  gdy stan POW == 2**. Zgadza sie to z obserwacja "najpierw 'unavailable', po chwili 'press start'".
-- Stan POW (`+0x80`) = 2 ustawia wylacznie handler `0x239a7c` (slot vtable 0x214), wywolany z parametrami
-  (typ=1, powod in {1,2,7}) **gdy POW jest "online"** (stan 1 + `POW_IS_ON` + flaga `+0x84` ustawiana przez
-  `PowBlazeConnected`, wolane z funkcji po zalogowaniu 0x4eab24). Ten sam filtr ma handler UI `0x15ccbf8`.
-  **Nie ustalono jeszcze, kto wysyla to zdarzenie** (to glowna nieznana).
-- START wywoluje `POWService::PowReconnect` (komunikat "connecting to EA SPORTS Football Club").
-- W logu RPCS3 nie ma **zadnego** zapytania POW (ani DNS `pas.gt.easfc.ea.com`, ani polaczenia z naszym
-  8094) -- `pow/healthcheck/system/all` nie jest wysylany. Powod nieznany.
-- Dwa nieudane zapytania DNS po zalogowaniu: `ut` pochodzi z modulu FUT (kod 0x51d3f4 buduje
-  `<FUT_RS4_BASE_URL>` + `"ut/game/fifa17/"`, a baza jest ustawiana w 0x4eab24 **tylko gdy serwer poda klucz**
-  `FUT_RS4_BASE_URL`; bez niego URL zaczyna sie od `ut/...` i hostem jest `ut`). Zapytanie z **pusta** nazwa
-  hosta wypada tuz po utworzeniu katalogow `imgAssets/banners/fifahub` i `.../easfcnewsalerts` -- te
-  katalogi tworzy kod POW (0x2309dc / 0x230a0c), wiec to prawdopodobnie pobieranie bannerow/newsow POW z
-  pustym URL-em (nie potwierdzone, nie jest to `FIFA_POW_URL`).
-- Domysly `getString` przy braku klucza sa kopiowane do bufora (dowod: `PIN_SERVER` -> `pin-river.data.ea.com`
-  dziala na wartosci domyslnej).
+**Confirmed in the EBOOT (code, not guesses):**
+- The corner banner is the `POWService` (EASFC) state machine. Function `0x15cc554` (SetStatus) picks the text from the table
+  {`TXT_EASFC_SERVER_ERROR`, `TXT_EASFC_PLEASE_SIGN_IN`, `TXT_EASFC_RECONNECTING`}; the subtitle `TXT_EASFC_RECONNECT_PROMPT`
+  ("PRESS START TO RE-CONNECT") appears only when the flag `POW+0x2670` is set - the POW tick (0x236178) sets it after
+  `POW_RECONNECT_TIMER_MS` (default 5000) **and only when the POW state == 2**. This matches the observation "first
+  'unavailable', after a while 'press start'".
+- POW state (`+0x80`) = 2 is set only by the handler `0x239a7c` (vtable slot 0x214), called with (type=1, reason in {1,2,7})
+  **when POW is "online"** (state 1 + `POW_IS_ON` + the flag `+0x84` set by `PowBlazeConnected`, called from the post-login
+  function 0x4eab24). The UI handler `0x15ccbf8` has the same filter. **Who sends this event is not known yet** (the main
+  unknown).
+- START calls `POWService::PowReconnect` (message "connecting to EA SPORTS Football Club").
+- The RPCS3 log contains **no** POW request at all (neither DNS `pas.gt.easfc.ea.com` nor a connection to our 8094) -
+  `pow/healthcheck/system/all` is not sent. Reason unknown.
+- Two failing DNS lookups after login: `ut` comes from the FUT module (code 0x51d3f4 builds `<FUT_RS4_BASE_URL>` +
+  `"ut/game/fifa17/"`, and the base is set in 0x4eab24 **only if the server provides the key** `FUT_RS4_BASE_URL`; without it the
+  URL starts with `ut/...` and the host is `ut`). The lookup with an **empty** host name happens right after the directories
+  `imgAssets/banners/fifahub` and `.../easfcnewsalerts` are created - POW code creates them (0x2309dc / 0x230a0c), so it is
+  probably POW downloading banners/news with an empty URL (not confirmed, it is not `FIFA_POW_URL`).
+- Defaults of `getString` for a missing key are copied into the buffer (proof: `PIN_SERVER` -> `pin-river.data.ea.com` works on the
+  default value).
 
-**Zmiana w serwerze (niezweryfikowana na zywym kliencie):** `serve_fut_config` (domyslnie wlaczone) dodaje do
-fetchClientConfig `FUT_RS4_BASE_URL` (`http://<host>:8094/fut/rs4/`, musi konczyc sie `/`) i
-`FUTDYNAMICMESSAGES_URL_BASE`; atrapa HTTP pod `pow_port` nagrywa zadania (logs/captures/pow_*.txt).
-Spodziewany efekt: zapytanie `ut` zamienia sie w prawdziwe polaczenie z naszym portem 8094 i zobaczymy, co FUT
-zadaje. Czy baner zniknie -- nie wiadomo.
+**Server change (unverified on a live client):** `serve_fut_config` (on by default) adds `FUT_RS4_BASE_URL`
+(`http://<host>:8094/fut/rs4/`, must end with `/`) and `FUTDYNAMICMESSAGES_URL_BASE` to fetchClientConfig; the HTTP stub at
+`pow_port` records the requests (logs/captures/pow_*.txt). Expected effect: the `ut` lookup becomes a real connection to
+our port 8094 and we will see what FUT requests. Whether the banner disappears is unknown.
 
-**Obejscie kosmetyczne (patch RPCS3, opcjonalny):** `tools/rpcs3_patch_easfc_banner.yml` -- jedno slowo,
-`blr` na wejsciu `SetStatus` (0x015CC554), wiec baner nigdy nie jest ustawiany. Wklej wpis pod ten sam
-klucz `PPU-1243af2b...` w `patch.yml` obok innych patchy, wlacz w Patch Managerze. Jesli po patchu zostanie
-pusty pasek, daj znac (nastepny krok: dodatkowo wylaczyc odswiezanie widgetu). Nie zmienia ani nie naprawia
-samej uslugi POW.
+**Cosmetic workaround (optional RPCS3 patch):** `tools/rpcs3_patch_easfc_banner.yml` - one word, `blr` at the entry of
+`SetStatus` (0x015CC554), so the banner is never set. Paste the entry under the same `PPU-1243af2b...` key in `patch.yml`
+next to the other patches and enable it in the Patch Manager. If an empty bar remains after the patch, say so (next step: also
+disable the widget refresh). It neither changes nor fixes the POW service itself.
 
-### Play Season: pusty ekran -- dane sezonu (2026-10-09, po tescie `5aa470a`)
-Test: baner bez zmian (POW nadal bez zadan), ale zapytanie `ut` zniklo i klient zadal
-`GET /fut/rs4/ut/game/fifa17/user/accountinfo` (FUT, Header `Easw-Session-Data-Nucleus-Id`) -- atrapa odpowiedziala `{}`.
-Play Season = pusty stadion + baner; w logu serwera po `getStatsByGroupAsync` dla `H2HSeasonalPlay` cisza.
-Z EBOT (potwierdzone w kodzie): ekran sezonu to sekwencja zadan (funkcja 0x6f95c8): [0] statystyki `H2HSeasonalPlay`,
-[1] `H2HPreviousSeasonalPlay`, ..., [3] konfiguracja `FIFA_H2H_SEASONALPLAY`. Funkcja 0x5086a8 wysyla zdarzenie
-`FE::FIFA::SeasonalPlayDownloadSuccess` **osobno dla kazdego wiersza encji** z wyniku Stats, a wartosci sklada z
-~65 statystyk po NAZWIE (0x507a84: seasons, curDivision, prevDivision, maxDivision, rankingPoints, seasonWins, ...).
-Nasze odpowiedzi mialy puste listy (brak deskryptorow `StatGroupResponse.STAT` i brak wiersza w `KeyScopedStatValues.STS.STAT`),
-wiec zdarzenie nie bylo nigdy wyslane i ekran czekal. **Zmiana (niezweryfikowana na kliencie):** `serve_seasonal_stats`
-(domyslnie wlaczone) -- dla grup `H2HSeasonalPlay`, `H2HPreviousSeasonalPlay`, `CoopSeasonalPlay_StatGroup` serwer odsyla
-deskryptory (70 nazw) i jeden wiersz dla EID gracza (wartosci "0", dywizje = "10"; ETYP=(30722,1) -- zgadniete).
-Nastepny krok: patrz log serwera -- jesli klient zada kolejnej grupy (`H2HPreviousSeasonalPlay`) albo
-`fetchClientConfig` z `CFID=FIFA_H2H_SEASONALPLAY` (klucze NUM_DIV, TOP_DIV, DIV_%d_NAME, PTS_WINS... z 0x4efe18), trzeba je obsluzyc.
-Wylaczenie: `"serve_seasonal_stats": false`. Baner "PRESS START" jest osobny (stan POW); patch: tools/rpcs3_patch_easfc_banner.yml.
+### Play Season: empty screen - season data (2026-10-09, after the `5aa470a` test)
+Test: banner unchanged (POW still no requests), but the `ut` lookup disappeared and the client requested
+`GET /fut/rs4/ut/game/fifa17/user/accountinfo` (FUT, header `Easw-Session-Data-Nucleus-Id`) - the stub answered `{}`.
+Play Season = empty stadium + banner; in the server log silence after `getStatsByGroupAsync` for `H2HSeasonalPlay`.
+From the EBOOT (confirmed in code): the season screen is a sequence of requests (function 0x6f95c8): [0] `H2HSeasonalPlay`
+stats, [1] `H2HPreviousSeasonalPlay`, ..., [3] the `FIFA_H2H_SEASONALPLAY` configuration. Function 0x5086a8 sends the event
+`FE::FIFA::SeasonalPlayDownloadSuccess` **separately for every entity row** of the Stats result and assembles the values from
+~65 statistics by NAME (0x507a84: seasons, curDivision, prevDivision, maxDivision, rankingPoints, seasonWins, ...). Our replies had
+empty lists (no `StatGroupResponse.STAT` descriptors and no row in `KeyScopedStatValues.STS.STAT`), so the event was never sent
+and the screen waited. **Change (unverified on a client):** `serve_seasonal_stats` (on by default) - for the groups
+`H2HSeasonalPlay`, `H2HPreviousSeasonalPlay`, `CoopSeasonalPlay_StatGroup` the server returns the descriptors (70 names) and one row
+for the player's EID (values "0", divisions = "10"; ETYP=(30722,1) - guessed). Next step: watch the server log - if the client
+requests another group (`H2HPreviousSeasonalPlay`) or `fetchClientConfig` with `CFID=FIFA_H2H_SEASONALPLAY` (keys NUM_DIV,
+TOP_DIV, DIV_%d_NAME, PTS_WINS... from 0x4efe18), they have to be served. Disable with `"serve_seasonal_stats": false`.
+The "PRESS START" banner is separate (POW state); patch: tools/rpcs3_patch_easfc_banner.yml.
 
-Detailed notes (in Polish) are at the end of this file: "Eksperyment `gm_deferred_pregame`",
-"Poprawka ksztaltow powiadomien", "Przebieg `gm_faithful_flow`", "Wnioski z kolejnej analizy EBOOT".
+Older notes that used to be appended at the end of this file are now in "Appendix: older GameManager notes" at the bottom.
+
+## History (older sessions, kept for reference)
+
+Everything from here down is older material. The sessions above are newer and win wherever they disagree with it
+(several early hypotheses below were later disproved - each such place says so).
 
 ## Current status (as of 2026-09-28)
 
@@ -1457,11 +1438,14 @@ manual byte-scanning, and do them against `v3_EBOOT.ELF`, not `v2_EBOOT.ELF`):
 `logs/`, `certs/`, and `config.json` are all gitignored, so there is never anything local worth
 preserving — no need for `git add`/`commit`/`push` before pulling.
 
-## Playing with a friend (later)
+## Playing with a friend
 
-Bind to `0.0.0.0`, set `blaze_advertise_host` in `config.json` to an address your friend can
-reach (public IP with a forwarded port, or a VPN such as Tailscale/ZeroTier/Hamachi), and have
-your friend put that address in *their* hosts file for `winter15.gosredirector.ea.com`.
+See "Playing with a second player (setup guide)" above for the full procedure. In short: the host runs the server
+(`update_and_run.ps1`) bound to `0.0.0.0` with `blaze_advertise_host` in `config.json` set to its VPN (Radmin) address; the
+friend does **not** run the server and does not need git - only RPCS3 configured to resolve
+`winter15.gosredirector.ea.com` to the host, the same three RPCS3 patches as the host (CA swap, NEW_THREAD_FOR_FE_INIT_STAGE3,
+Nucleus URL) and, for the diagnostic rounds, the trace patch (a ready-made `patch.yml` can simply be copied over the friend's
+`patches/patch.yml`).
 
 ## Configuration
 
@@ -1476,17 +1460,35 @@ comment explaining what it's for and why it exists), e.g.
 ## Layout
 
 ```
-fifa17srv/redirector.py   fake redirector (HTTPS)
-fifa17srv/blaze.py        main Blaze protocol handler -- almost all protocol logic lives here
-fifa17srv/probe.py        capture probe for the main Blaze port
-fifa17srv/server.py       threaded server, capture logs, TLS-or-plaintext negotiation
-fifa17srv/tls_hello.py    ClientHello parser (explains handshake failures)
-fifa17srv/tdf.py          TDF codec
-fifa17srv/analyze.py      capture inspection helper
-fifa17srv/certs.py        throwaway local CA + server cert
-fifa17srv/config.py       Config dataclass, all tunables with inline comments
-tools/*.ps1               hosts/CA install and removal (Windows, run as admin)
-update_and_run.ps1        one-command pull + run for repeat testing
+fifa17srv/redirector.py      fake redirector (HTTPS)
+fifa17srv/blaze.py           main Blaze protocol handler -- most protocol logic lives here
+fifa17srv/gamemgr.py         GameManager (0x0004): game state, host-only setup ladder, watchdog, probes
+fifa17srv/gmtrace.py         per-attempt GameManager journal (logs/gm_attempts.log)
+fifa17srv/ids.py             player ids (one source of truth for the whole server)
+fifa17srv/messaging.py       Messaging (0x000F) mailbox
+fifa17srv/usersettings.py    persistent Util::userSettings* (state/user_settings.json)
+fifa17srv/nucleus.py         fake Nucleus (console login, hands out an auth code)
+fifa17srv/qos.py             local QoS server
+fifa17srv/telemetry_stub.py  EA telemetry stub (TLS + HTTP 200, logs the request body)
+fifa17srv/pow_stub.py        POW (EASFC) / FUT web stub -- only records requests
+fifa17srv/tcp_record.py      recording TCP stub (ticker)
+fifa17srv/probe.py           capture probe for the main Blaze port
+fifa17srv/server.py          threaded server, capture logs, TLS-or-plaintext negotiation
+fifa17srv/tls_hello.py       ClientHello parser (explains handshake failures)
+fifa17srv/tdf.py             TDF codec
+fifa17srv/analyze.py         capture inspection helper
+fifa17srv/certs.py           throwaway local CA + server cert
+fifa17srv/config.py          Config dataclass, all tunables with inline comments
+fifa17srv/selftest.py        synthetic-client self-test (python -m fifa17srv selftest)
+fifa17srv/find_*.py, dump_*.py, disasm_range.py   ad-hoc EBOOT reverse-engineering helpers (comments partly Polish)
+tools/*.ps1                  hosts/CA install and removal (Windows, run as admin)
+tools/make_trace_patch.py    generator + self-test of the RPCS3 trace patch (tools/rpcs3_patch_trace_invites.yml)
+tools/install_trace_patch.py add/remove the trace patch in RPCS3's patches/patch.yml
+tools/decode_trace.py        decode trace markers from RPCS3.log
+tools/rpcs3_patch_easfc_banner.yml   optional cosmetic RPCS3 patch (hides the EAS FC corner banner)
+update_and_run.ps1           one-command pull + run for repeat testing
+collect_logs.ps1             zip server logs, journal, state and config for analysis
+TEST_PLAN.md                 step-by-step test procedure (in Polish)
 ```
 
 ## Security notes
@@ -1501,62 +1503,65 @@ update_and_run.ps1        one-command pull + run for repeat testing
 1. ~~Capture redirector + first Blaze packets.~~ Done.
 2. ~~Confirm frame format; implement PreAuth / Ping / Authentication responses.~~ Done.
 3. ~~Get the client to a logged-in main menu with a local fake profile.~~ Done.
-4. Get past the Online menu into an actual match (Cup Match freeze / Season blank screen — see
-   "Current blocker" above). **Still stuck, unrelated to Online Friendlies progress below.**
-5. **Current:** Online friendlies: lobby, invite, matchmaking, session hand-off (P2P vs relayed
-   TBD). `GameManager::createGame` implemented (see "Online Friendlies" section above); still
-   needs a live two-player test to confirm it actually unblocks the "Please wait" screen, then
-   `joinGame` and real P2P address exchange.
-6. Docs of the protocol (clean-room notes, no EA code).
+4. ~~Make the host-side `GameManager::createGame` handshake complete without crashing.~~ Done (host-only setup ladder,
+   all five levels reach `finalizeGameCreation`).
+5. **Current:** make the host's game actually send the invitation (`EVENT_CREATEGAME_SUCCESS` -> `SendGameInvite` ->
+   `sceNpBasicSendMessageGui`). Use trace patch round 2 to find where the createGame completion path stops, then fix the
+   server reply (or work around it).
+6. Friend side: accept the invitation (`joinGame`), real P2P address exchange over UDP 3659/9999, play a match.
+7. Get past the Online menu for Cup Match / Season (blank screen / "Loading Seasons information..." - see
+   "Current blocker" below). Unrelated to the Online Friendlies progress above.
+8. Docs of the protocol (clean-room notes, no EA code).
 
 ## Related work
 
 Other people are reviving old FIFA online modes (mostly Ultimate Team); this project focuses on
 friendlies. Contributions and shared captures are welcome. License: MIT.
 
-### Eksperyment `gm_deferred_pregame` (2026-10-08, niezweryfikowany)
+## Appendix: older GameManager notes (2026-10-08, translated from Polish)
 
-Hipoteza: w NotifyGameSetup gra ma GSTA=INITIALIZING(1), a dopiero po `finalizeGameCreation`
-serwer wysyla NotifyGameStateChange(PRE_GAME=130). Wlaczone domyslnie; `"gm_deferred_pregame": false`
-w config.json przywraca stare zachowanie (PRE_GAME od razu). Analiza EBOOT: sukces createGame
-(EVENT_CREATEGAME_SUCCESS) jest zglaszany przez listener OSDK (0x1624e1c) wywolywany z warstwy
-GameManagerAPI; dokladny warunek wywolania nie zostal jeszcze ustalony.
+### Experiment `gm_deferred_pregame` (2026-10-08, unverified)
 
-### Poprawka ksztaltow powiadomien z refleksji EBOOT (2026-10-08)
+Hypothesis: in `NotifyGameSetup` the game should have GSTA=INITIALIZING(1), and only after `finalizeGameCreation` does the
+server send NotifyGameStateChange(PRE_GAME=130). On by default; `"gm_deferred_pregame": false` in config.json restores
+the old behaviour (PRE_GAME at once). EBOOT analysis: the createGame success (`EVENT_CREATEGAME_SUCCESS`) is raised by the
+OSDK listener (0x1624e1c) called from the GameManagerAPI layer; the exact condition for the call had not been established yet
+(see the 2026-10-11 late-evening notes for the current understanding).
 
-Z tablic klas TDF w EBOOT.ELF (zweryfikowane): `NotifyPlatformHostInitialized` = {GID, **PHID**}
-(wczesniej blednie PHST z Impulsum14), `NotifyPlayerJoinCompleted` = {GID, PID, **TIME**},
-`NotifyGamePlayerStateChange` = {GID, PID, STAT}, `NotifyGameStateChange` = {GID, GSTA},
-`NotifyPlayerJoining` = {GID, PDAT, QOST}. `NotifyGameSetup` ma pola GAME, LFPJ, MNAM, PROS, QOSS,
-QOSV, QUEU, REAS, TELM. Narzedzie: `tdfauto.py` (poza repo).
+### Corrected notification shapes from the EBOOT reflection (2026-10-08)
 
-`NotifyPlatformHostInitialized` = {GID, PHID, PHST(slot)} (3 pola). `ReplicatedGamePlayer` wg refleksji:
-CSID, DSUI, EXBL, EXID, GID, JFPS, JVMM, LOC, NAME, NASP, PATT, PID, PNET, PSET, RCRE, ROLE, SID, SLOT,
-STAT, TIDX, TIME, UGID, UID, UUID -- do rostera dodano EXBL (NpId), LOC, NASP, PATT, TIME.
-`ReplicatedGameData`: ADMN APRS ATTR CAP COID CRIT CTIM DHST DNET ESNM GGTY GID GMRG GNAM GPVH GSET GSID
-GSTA GTYP GURL HNET MATR MCAP MNCP NPSI NQOS NRES NTOP PGID PGSR PHST PRES PSAS QCAP RNFO SCID SEED STMN
-THST TIDS UUID VOIP VSTR XNNC XSES (HSES, ktorego wysylalismy, tam nie istnieje).
+From the TDF class tables in EBOOT.ELF (verified): `NotifyPlatformHostInitialized` = {GID, **PHID**} (earlier wrongly PHST
+from Impulsum14), `NotifyPlayerJoinCompleted` = {GID, PID, **TIME**}, `NotifyGamePlayerStateChange` = {GID, PID, STAT},
+`NotifyGameStateChange` = {GID, GSTA}, `NotifyPlayerJoining` = {GID, PDAT, QOST}. `NotifyGameSetup` has the fields GAME,
+LFPJ, MNAM, PROS, QOSS, QOSV, QUEU, REAS, TELM. Tool: `tdfauto.py` (not in the repo).
 
-Dodane (niezweryfikowane na zywym kliencie): zadania GameManager advanceGameState (3), setGameAttributes (7),
-setPlayerAttributes (8) sa potwierdzane pusta odpowiedzia i rozsylane do wszystkich graczy gry jako
+`NotifyPlatformHostInitialized` = {GID, PHID, PHST(slot)} (3 fields). `ReplicatedGamePlayer` according to the reflection: CSID,
+DSUI, EXBL, EXID, GID, JFPS, JVMM, LOC, NAME, NASP, PATT, PID, PNET, PSET, RCRE, ROLE, SID, SLOT, STAT, TIDX, TIME, UGID, UID,
+UUID - EXBL (NpId), LOC, NASP, PATT, TIME were added to the roster. `ReplicatedGameData`: ADMN APRS ATTR CAP COID CRIT CTIM DHST
+DNET ESNM GGTY GID GMRG GNAM GPVH GSET GSID GSTA GTYP GURL HNET MATR MCAP MNCP NPSI NQOS NRES NTOP PGID PGSR PHST PRES PSAS QCAP
+RNFO SCID SEED STMN THST TIDS UUID VOIP VSTR XNNC XSES (the HSES we used to send does not exist there).
+
+Added (unverified on a live client at the time): the GameManager requests advanceGameState (3), setGameAttributes (7),
+setPlayerAttributes (8) are acknowledged with an empty reply and broadcast to all players of the game as
 NotifyGameStateChange (100) / NotifyGameAttribChange (80) / NotifyPlayerAttribChange (90).
-Analiza EBOOT: kod FIFA (0xc49180..) przelacza zmienne UI wg stanu gry: INITIALIZING(1) ustawia 'gsid'
-(id gry) dla hosta, PRE_GAME(130) ustawia 'peer'=1 -- czyli klient oczekuje przejscia 1 -> 130, co
-wspiera hipoteze gm_deferred_pregame.
+EBOOT analysis: FIFA code (0xc49180..) switches UI variables according to the game state: INITIALIZING(1) sets 'gsid' (game id)
+for the host, PRE_GAME(130) sets 'peer'=1 - so the client expects the transition 1 -> 130, which supports the
+gm_deferred_pregame hypothesis.
 
-### Przebieg `gm_faithful_flow` (2026-10-08, domyslnie wlaczony, niezweryfikowany)
-createGame: host dostaje NotifyGameSetup tylko ze soba (stan CONNECTED, GSTA=INITIALIZING). Po jego
-finalizeGameCreation serwer wysyla hostowi PRE_GAME + PlatformHostInitialized, a zaproszonemu
-NotifyGameSetup (PRE_GAME, roster host+on, IndirectJoin) + PlatformHostInitialized; host dostaje
-NotifyPlayerJoining. Dalej jak dotad: updateMeshConnection STAT=2 -> PlayerStateChange(4) + JoinCompleted.
+### The `gm_faithful_flow` flow (2026-10-08, on by default at the time, unverified)
+createGame: the host gets NotifyGameSetup only with itself (state CONNECTED, GSTA=INITIALIZING). After its
+finalizeGameCreation the server sends the host PRE_GAME + PlatformHostInitialized, and the invitee a NotifyGameSetup
+(PRE_GAME, roster host+invitee, IndirectJoin) + PlatformHostInitialized; the host gets NotifyPlayerJoining. Then as before:
+updateMeshConnection STAT=2 -> PlayerStateChange(4) + JoinCompleted. (Superseded by the 2026-10-11 host-only ladder.)
 
-### Wnioski z kolejnej analizy EBOOT (2026-10-08)
-- Konstruktor klasy Game (0xc58c3c) w stanie INITIALIZING(1), POST_GAME(132) i MIGRATING(133) tworzy
-  dodatkowy obiekt "hosta platformy" z PHST/THST, a w PRE_GAME(130) hosta topologii szuka w rosterze po
-  THST.HPID (czyli host MUSI byc w PROS pod tym samym PID co THST.HPID -- tak jest w naszej odpowiedzi).
-- `isHost` = (host topologii == lokalny gracz); lokalny gracz jest wiazany po BlazeId zalogowanego
-  uzytkownika, wiec PID hosta widziany przez hosta musi byc rowny jego wlasnemu BlazeId (LOCAL_USER_ID).
-- Kod FIFA (0xc4917x) ustawia zmienna 'gsid' (id gry) tylko w obsludze stanu INITIALIZING hosta, wiec
-  pominiecie tego stanu (stary wariant: PRE_GAME od razu) mogl cos psuc.
-- Gracze dolaczajacy do gry, ktora nie jest jeszcze w PRE_GAME..POST_GAME, trafiaja do
-  `Game::mDeferredJoiningPlayerMap` (odroczone) -- dlatego zaproszony dostaje setup dopiero po przejsciu do PRE_GAME.
+### Conclusions from a further EBOOT analysis (2026-10-08)
+- The constructor of class Game (0xc58c3c) in state INITIALIZING(1), POST_GAME(132) and MIGRATING(133) creates an extra
+  "platform host" object from PHST/THST, and in PRE_GAME(130) it looks the topology host up in the roster by THST.HPID (so the
+  host MUST be in PROS under the same PID as THST.HPID - it is in our reply).
+- `isHost` = (topology host == local player); the local player is bound by the BlazeId of the logged-in user, so the host's PID
+  as seen by the host must equal its own BlazeId (LOCAL_USER_ID). (Refined on 2026-10-11: the real comparison is between
+  network endpoints keyed by CONG, see "the isHost model".)
+- FIFA code (0xc4917x) sets the variable 'gsid' (game id) only in the INITIALIZING handler of the host, so skipping that state
+  (old variant: PRE_GAME at once) might have broken something.
+- Players joining a game that is not yet in PRE_GAME..POST_GAME go to `Game::mDeferredJoiningPlayerMap` (deferred) - that is
+  why an invitee only gets its setup after the transition to PRE_GAME.
