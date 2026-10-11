@@ -883,6 +883,9 @@ OSDK_CORE_DEFAULTS = [
     ("OSDK_STATS_EMPTY_CELL", "-1"),
     ("OSDK_TICKER_COUNT", "10"),
     ("JOIN_GAME_TIMEOUT", "30"),
+    # limit czasu poczekalni przed meczem (EBOOT 0x4d087c czyta go z konfiguracji; bez wpisu domyslnie 10 s -- host
+    # wracal do menu po ~14 s, zanim kolega zdazylby zobaczyc i przyjac zaproszenie)
+    ("MAX_PREGAME_TIMEOUT", "120"),
 ]
 
 

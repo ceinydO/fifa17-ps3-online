@@ -246,6 +246,24 @@ def _gamemgr_checks() -> None:
     gamemgr.reset()
 
 
+def _trace_patch_checks() -> None:
+    """tools/make_trace_patch.py: kodowanie + semantyka lat-znacznikow (emulator) i aktualnosc pliku YAML."""
+    import contextlib
+    import importlib.util
+    import io
+    path = Path(__file__).resolve().parent.parent / "tools" / "make_trace_patch.py"
+    if not path.exists():
+        return
+    spec = importlib.util.spec_from_file_location("make_trace_patch", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with contextlib.redirect_stdout(io.StringIO()):
+        ok = mod.selftest()
+    check("lata-znaczniki RPCS3: kodowanie i zachowanie rejestrow (emulator) sa poprawne", bool(ok))
+    check("tools/rpcs3_patch_trace_invites.yml jest aktualny (odtworz: python tools/make_trace_patch.py)",
+          mod.main(["--check"]) == 0)
+
+
 def run_selftest() -> int:
     logging.getLogger("fifa17srv").setLevel(logging.WARNING)
     tmp = Path(tempfile.mkdtemp(prefix="fifa17srv_test_"))
@@ -432,6 +450,8 @@ def run_selftest() -> int:
     check("TDF decoder rejects garbage without crashing", err is not None and fields == [])
 
     _gamemgr_checks()
+
+    _trace_patch_checks()
 
     psrv.stop()
     rsrv.stop()

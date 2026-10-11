@@ -24,6 +24,17 @@ from .server import Capture, negotiate
 log = logging.getLogger("fifa17srv")
 
 
+def _content_length(head: bytes) -> int:
+    for line in head.split(b"\r\n")[1:]:
+        name, _, value = line.partition(b":")
+        if name.strip().lower() == b"content-length":
+            try:
+                return max(0, min(int(value.strip()), 60000))
+            except ValueError:
+                return 0
+    return 0
+
+
 def handle(conn: socket.socket, addr, cfg: Config, ctx=None) -> None:
     cap = Capture(cfg, "telemetry", addr)
     try:
@@ -35,7 +46,12 @@ def handle(conn: socket.socket, addr, cfg: Config, ctx=None) -> None:
         stream.settimeout(5)
         buf = b""
         try:
-            while b"\r\n\r\n" not in buf and len(buf) < 65536:
+            # czytamy az do konca naglowkow, a potem tyle bajtow tresci, ile mowi Content-Length (bugsentry przysyla
+            # tresc w osobnym rekordzie TLS -- wczesniej byla gubiona)
+            while len(buf) < 65536:
+                head, sep, body = buf.partition(b"\r\n\r\n")
+                if sep and len(body) >= _content_length(head):
+                    break
                 chunk = stream.recv(4096)
                 if not chunk:
                     break
@@ -46,6 +62,10 @@ def handle(conn: socket.socket, addr, cfg: Config, ctx=None) -> None:
         if buf:
             line = buf.split(b"\r\n", 1)[0].decode("latin-1", "replace")
             cap.note(f"telemetry zadanie: {line}")
+            body = buf.partition(b"\r\n\r\n")[2]
+            if body:
+                # tresc to zdarzenia PIN / raporty bugsentry (JSON) -- np. ServerError z nazwa uslugi; trafia do logu sesji
+                cap.note("telemetry tresc: " + body[:1500].decode("utf-8", "replace").replace("\r", " ").replace("\n", " "))
         else:
             cap.note("telemetry: klient nawiazal polaczenie ale nie przyslal zadania HTTP")
         resp = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"

@@ -15,6 +15,51 @@ game itself.
 > source of truth for what is confirmed, what is a guess, and what is still broken — so a fresh
 > session (human or Claude) does not have to re-derive it from scratch.
 
+## Latest session: 2026-10-11 wieczor (host-only drabinka OK na wszystkich poziomach; zaproszenia nadal brak)
+
+**Wynik testu (`logs/gm_attempts.log` 13:34-13:38, RPCS3 hosta `odyniec` i kolegi `odyniec1`):**
+- 8 x `createGame`, poziomy 1-5 (host-only) -> **kazdy doszedl do `finalizeGameCreation`, zero crashy** (poprawka z b015730
+  dziala). Stan: `state/gm_variant.json` = poziom 5, wszystkie "good". Poziomy 3-5 (INITIALIZING) host zamyka sam
+  `advanceGameState(PRE_GAME)` (cmd 0x0003) -- to normalny przebieg.
+- Po finalize host robi **zawsze to samo, niezaleznie od poziomu**: ~0,7 s: `lookupUsersByPersonaNames(['odyniec1'])`,
+  ~0,8 s: `Stats::getStatsByGroupAsync` grupy `MyFriendlies` dla WLASNEGO EID, i **cisza** (nic na Blaze az do
+  recznej nastepnej proby ~30 s pozniej). Kolega nie wysyla niczego (nie ma `joinGame`).
+- **RPCS3 hosta: zero wywolan `sceNpBasicSendMessageGui`** i zero `sceNpLookup*` poza inicjalizacja przy starcie
+  (`sceNpLookupInit/CreateTitleCtx`), czyli lancuch wysylki zaproszenia (nizej) nie dochodzi do NP.
+  Kolega: tylko `basic_event: event:1` (PRESENCE) i `event:0` (OFFLINE), nigdy `event:5`/`event:2`.
+- **Telemetria (nowy odczyt `logs/captures/telemetry_*.txt`, tresc jest jawnym tekstem po deszyfrowaniu TLS):** jedyne
+  zdarzenia to `client_bugsentry` -> `ServerError`, `server_name:"SportsWorld"`, `server_type:"https"`,
+  `errid:"disconnect"`, powtarzane przy KAZDYM `lookupUsersByPersonaNames` (u hosta i kolegi, takze po createGame).
+  SportsWorld = usluga EASW (klucze konfiguracji `OSDK_EASW_AUTH_URL/REQ_URL/MEDIA_URL/EVENT_URL/GF_FILE_URL`,
+  modul `0x30eb10`, op `ConnectToSportsWorld` `0x309388`, `LoadSportsWorldUserPresence` `0x30f2f0`,
+  `SendFriendsToSportsWorld` `0x30f068`); serwer nie podaje tych kluczy, wiec gra konczy kazde zapytanie bledem
+  "disconnect". **Czy to blokuje zaproszenie -- nieznane** (nie ma dowodu ani za, ani przeciw).
+  (Kosmetyka: `pid` w telemetrii jest ten sam u obu graczy, bo `postAuth.UROP.UID` dostaje stala wartosc hosta.)
+
+**Lancuch wysylki zaproszenia na PS3 (statycznie, dekompilacja; flaga `UNK_025fbcd0` jest tylko czytana, nigdy pisana,
+=0 => sciezka NP):** Flash UI -> adaptor `OSDK_GameInvitationAdaptor` (`0x16491b4` SendGameInvite /
+`0x1649264` SendMultipleGameInvites; **po cichu nic nie robia, gdy modul `ginv` nie jest zarejestrowany**) ->
+modul `ginv` (`0x301ad4`, rejestrowany w `0x302184` gdy `Invitations[5]==1`) -> op `SendGameInvite`
+(`0x3019a4`) -> menedzer `puid` (`0x2cd938`, op "LookupPlatformUserId": najpierw lokalna lista znajomych `0x2f8b50`/
+`0x27ea00`, dopiero potem `sceNpLookupNpIdAsync`) -> callback `0x30262c` -> `0x302454` (wymaga biezacej sesji z `gses`
+vt[0x24], inaczej zwraca blad 4 bez NP) -> `sceNpBasicSendMessageGui`. Poza tym wywoluje go tylko `0x2f95c0`
+(inna operacja, jeden odbiorca). `sceNpBasicSendMessage/Attachment` nie sa nigdzie wolane.
+Nie wiadomo, **na ktorym ogniwie lancuch sie zatrzymuje** (UI w ogole nie wola adaptora / modulu `ginv` brak /
+op konczy sie bledem) -- dlatego nowe narzedzie ponizej.
+
+**Nowe narzedzie: lata-znaczniki RPCS3 (`tools/make_trace_patch.py`, `tools/rpcs3_patch_trace_invites.yml`).**
+Podmienia drugie slowo (`bl _savegpr_N`) w 18 funkcjach (lancuch zaproszenia, `post_event` = KAZDE zdarzenie UI
+`EVENT_*`, handlery NP, operacje SportsWorld) na `bl` do stuba w nieuzywanym obszarze `0x0211D810`; stub wola
+wspolna procedure, ktora zachowuje wszystkie rejestry i loguje argumenty przez `cellRtcSetTime_t` (RPCS3 drukuje
+`iTime=0xFA<id><k><wartosc>`). Dekoder: `tools/decode_trace.py RPCS3.log --elf EBOOT.ELF` (nazwy zdarzen czyta z
+EBOOT). Instalator: `tools/install_trace_patch.py <folder rpcs3>`. Kodowanie sprawdzone capstone, a semantyka
+(zachowanie r0-r12, f1-f13, LR, CR, CTR, poprawny log) wlasnym emulatorem w `--selftest` (wlaczone do selftestu repo).
+**Nie sprawdzone na zywo w RPCS3** (rekompilator PPU) -- jesli gra nie startuje, odznacz latke w Patch Managerze.
+
+**Zmiana serwera:** `MAX_PREGAME_TIMEOUT=120` w konfiguracji klienta (`OSDK_CORE_DEFAULTS`; EBOOT `0x4d087c` czyta
+go z konfiguracji, domyslnie 10 s -- host wracal do menu po ~14 s, zanim kolega zdazylby przyjac zaproszenie).
+Atrapa telemetrii czyta teraz cala tresc zadania (Content-Length) i loguje ja do logu sesji (`telemetry tresc: ...`).
+
 ## Latest session: 2026-10-09 wieczor (pierwszy test na zywo po przebudowie GameManager)
 
 **Wynik testu (host `odyniec` + kolega `odyniec1`, Radmin, logi serwera i obu RPCS3):**

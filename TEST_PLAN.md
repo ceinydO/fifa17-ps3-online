@@ -1,5 +1,22 @@
 # Plan testu (nastepna sesja)
 
+## TEST Z ZNACZNIKAMI (2026-10-11 wieczor) -- zrob to najpierw
+Cel: dowiedziec sie, w ktorym miejscu FIFA zatrzymuje wysylanie zaproszenia (README, "Latest session: 2026-10-11 wieczor").
+Drabinka NotifyGameSetup jest zrobiona: wszystkie 5 poziomow dochodzi do `finalizeGameCreation` bez crasha, serwer zostaje
+na poziomie 5.
+1. **Oba komputery:** `git pull`. Host: `.\update_and_run.ps1` (serwer ma dzialac przez caly test).
+2. **Oba komputery, jednorazowo:** zainstaluj latke-znacznik (dopisuje wpis do `patches\patch.yml` RPCS3):
+   `python tools\install_trace_patch.py "C:\sciezka\do\rpcs3"` (folder z rpcs3.exe), potem w RPCS3
+   Manage -> Patch Manager -> FIFA 17 -> BLES02233 v01.00 -> zaznacz **FIFA trace (zaproszenia i zdarzenia UI)**.
+   Pierwsze uruchomienie gry po tej zmianie kompiluje PPU od nowa (kilka minut) -- to normalne.
+   Jesli gra nie dojdzie do menu glownego / wywala sie przy starcie: odznacz te latke i daj znac (nic wiecej nie rob).
+3. Host: Online Friendlies -> zaproszenie kolegi, poczekaj ~20 s, ponow 2-3 razy. Kolega patrzy, czy cos sie pojawia.
+   Zapisz jednym zdaniem, **co widac na ekranie hosta** po zaproszeniu i po ilu sekundach to znika.
+4. Zamknij gre w RPCS3 normalnie (X okna gry), **skopiuj `RPCS3.log` zaraz po tescie** (host i kolega), potem na hoscie
+   `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` i wyslij zip + oba `RPCS3.log`.
+Wyniki czyta sie komenda `python tools/decode_trace.py RPCS3.log --elf EBOOT.ELF` (linie `EVT ...` = zdarzenia UI,
+`0x12 ginv::SendGameInvite` = lancuch zaproszenia, `NP sceNp...` = wywolania NP obok).
+
 1. Oba komputery: `git pull`, uruchom serwer jak dotad. `config.json` ma zawierac tylko
    `{"idle_timeout":600,"bind_address":"0.0.0.0","blaze_advertise_host":"<twoj adres Radmin>"}`.
 2. Zrob zaproszenie jak zwykle (host zaprasza kolege, "Online Friendlies").
