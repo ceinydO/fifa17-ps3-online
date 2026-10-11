@@ -1,6 +1,28 @@
 # Plan testu (nastepna sesja)
 
-## TEST Z ZNACZNIKAMI (2026-10-11 wieczor) -- zrob to najpierw
+## TEST RUNDA 3 (2026-10-12) -- zrob to najpierw
+Wynik rundy 2 (README, "Latest session: 2026-10-12"): host woluje `createGame` z innego miejsca niz adaptor UI
+CreateGame, listener wyniku nie wysyla `EVENT_CREATEGAME_SUCCESS`, wiec UI nigdy nie dochodzi do wyslania zaproszenia.
+Ta runda pokazuje, KTO woluje `createGame` i jaki kod dostaje wynik, a opcjonalny eksperyment wymusza brakujace
+wywolanie skryptu UI (`OnOnlineCreateSession`).
+1. **Oba komputery:** podmien `patches\patch.yml` w folderze RPCS3 plikiem od Claude'a (ten sam plik dla obu; stary
+   zapisz jako `patch.yml.bak`). Plik lezy w podfolderze `patches` folderu z `rpcs3.exe` (host: `C:\rcps3\patches\patch.yml`).
+   (Gdy masz git: `python tools\install_trace_patch.py "C:\rcps3"` robi to samo.)
+2. W RPCS3: Manage -> Patch Manager -> FIFA 17 -> BLES02233 v01.00 -> zaznacz **oba** wpisy: **FIFA trace (zaproszenia i
+   zdarzenia UI)** i **FIFA eksperyment - wymus OnOnlineCreateSession po createGame**. Pierwszy start gry kompiluje PPU
+   od nowa (kilka minut) -- to normalne. Kolega moze miec zaznaczony tylko "FIFA trace", ale oba tez nie szkodza.
+3. Host: `.\update_and_run.ps1` (serwer przez caly test). Obaj: uruchom FIFA 17, wejdz w Online Friendlies i **zostan
+   online obaj przez caly test**.
+4. Host: zaproszenie kolegi (Play Match), poczekaj 30 s. Jesli RPCS3 pokaze okno wyboru znajomego / wiadomosci --
+   wybierz `odyniec1` i zatwierdz. Ponow raz. **Zapisz jednym zdaniem, co widac na ekranie hosta i kolegi** (czy cos sie
+   pojawia, czy ekran sie zmienia, czy "please wait" znika).
+5. Zamknij gre normalnie, **skopiuj `RPCS3.log` zaraz po tescie** (obaj), host: `collect_logs.ps1`. Wyslij zip + oba logi.
+Jesli gra wywala sie/zawiesza przy zaproszeniu: zapisz to, zamknij, odznacz "FIFA eksperyment" i powtorz (znaczniki
+zostaja) -- logi z obu podejsc sa cenne.
+Odczyt: `python tools/decode_trace.py RPCS3.log --elf EBOOT.ELF` -- linie `0x70 createGame -> ... WOLA KOD <adres>`,
+`UI-SKRYPT <nazwa>(...) <- <kto wolal>` i `<- LR (fn START)` przy znacznikach.
+
+## TEST Z ZNACZNIKAMI (2026-10-11 wieczor) -- wykonany (runda 1-2), zostaje jako opis procedury
 Cel: dowiedziec sie, w ktorym miejscu FIFA zatrzymuje wysylanie zaproszenia (README, "Latest session: 2026-10-11 wieczor").
 Drabinka NotifyGameSetup jest zrobiona: wszystkie 5 poziomow dochodzi do `finalizeGameCreation` bez crasha, serwer zostaje
 na poziomie 5.

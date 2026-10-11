@@ -15,7 +15,7 @@ game itself.
 > source of truth for what is confirmed, what is a guess, and what is still broken — so a fresh
 > session (human or Claude) does not have to re-derive it from scratch.
 
-## Quick orientation (2026-10-11, late evening)
+## Quick orientation (2026-10-12)
 
 **Goal:** two real players (two PCs, RPCS3, Radmin VPN) play an *Online Friendlies* match: the host invites a
 friend, the friend sees the invitation, accepts, both end up in the same Blaze game and exchange P2P traffic.
@@ -28,12 +28,68 @@ friend, the friend sees the invitation, accepts, both end up in the same Blaze g
   delivers the invitation to the friend), so the friend sees nothing. A trace patch for RPCS3 (below) showed that the
   game finishes `createGame` internally ("GSMR" success callback) but never raises `EVENT_CREATEGAME_SUCCESS`, which
   the UI needs before it asks the invitation module to send anything.
-- Next step: run **round 2 of the trace patch** (39 hooks, see "Trace patch" below) with both players online for the
-  whole test, then read the result with `tools/decode_trace.py`.
+- Round 2 of the trace patch has been run with both players online (2026-10-12): see "Latest session: 2026-10-12"
+  right below. Short version: the game calls `createGame` from **some other code path than the CreateGame UI adaptor**,
+  so the listener that would post `EVENT_CREATEGAME_SUCCESS` is never involved. Next step: **round 3** (below) tells
+  who calls `createGame` and which listener receives the result, and includes an optional experiment that forces the
+  missing UI callback.
 
 **Useful commands:** server `powershell -ExecutionPolicy Bypass -File .\update_and_run.ps1` (host only);
 logs for analysis `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` (zip) + `RPCS3.log` of both players;
-selftest `python -m fifa17srv selftest` (58 checks).
+selftest `python -m fifa17srv selftest`.
+
+## Latest session: 2026-10-12 (trace patch round 2 with both players online)
+
+**Setup.** Host (`odyniec`, `C:\rcps3`) and friend (`odyniec1`) both ran RPCS3 with the round-2 patch (396 patch words
+applied on both), both logged in to RPCN, both online for the whole ~5.5 min. The host pressed "invite" six times.
+Server log: six `createGame` requests (GID 1..6), each answered at level 5 of the host-only ladder and completed by
+`updateMeshConnection` + `finalizeGameCreation` (the watchdog confirms), no errors.
+
+**RPCN is fine.** Both RPCS3 instances are `PSN status: RPCN` and logged in; they are RPCN friends of each other (host log:
+`basic_event: event:0/9/1 from odyniec1`, friend log: `event:9/1 from odyniec`). Presence travels in both directions
+(host 55 bytes at login and 64 bytes at ~300 s, friend 64 bytes at ~206 s). The friend's game polls
+`sceNpBasicGetFriendPresenceByIndex(0)` every 10 s. The friend received **no** `INCOMING_INVITATION` (5),
+`MESSAGE` (2) or `SEND_INVITATION_RESULT` (13): the host never called `sceNpBasicSendMessage*`, so the problem is
+entirely on the host side, not in RPCN or on the friend's PC.
+
+**Host-side chain, identical on all six attempts** (decoded with `tools/decode_trace.py`):
+`OSDK SCRN/PUEN` (busy popup) -> `0x51 GameSessionManager::createGame` (r3 = manager `0x10F65E90`, r4 = params on the
+FEThread stack `0xD012D6A0`, r5 = **listener `0x1106B288`**) -> `0x52` op ctor -> `0x5B` NotifyGameSetup handler ->
+`0x5C` onNetworkCreated -> `0x5D` finalizeGameCreation sent -> `0x5E` response -> `0x20` GSMR success callback ->
+`0x54` GameSession ctor -> `0x55` setCurrentSession -> `OSDK GSMR/SUCC` -> `EVENT_NETWORK_END` -> `SCRN/PUEX` (the popup
+closes ~0.1 s after the request) -> SportsWorld loads (`LoadSportsWorldUserPresence`, `LoadSportsWorldUsers`).
+On the Blaze side the only follow-ups are `lookupUsersByPersonaNames(['odyniec1'])` and
+`Stats::getStatsByGroupAsync` for the group `MyFriendlies`.
+
+**Never entered, not even once in six attempts:**
+- `0x53` = the CreateGame UI adaptor `0x1624180` (so `createGame` is **not** called from it; the only function that
+  posts `EVENT_CREATEGAME_SUCCESS` is the adaptor's listener `0x1624e1c`, by static xref the only one),
+- `0x59`/`0x5A` (that listener's success/failure), `0x56`/`0x57`/`0x58` (SetPlayerAttribute path),
+- the whole match-up FSM (`0x5F`, `0x60`, `0x62`, `0x63`, `0x64`) - its tick `0x4d0aa4` runs but never gets a relevant event,
+- every invitation function (`0x10`-`0x16`, `0x18`).
+
+**Conclusion.** `createGame` reaches the success callback and calls `listener->vt[0]`, but the listener in `r5`
+(`0x1106B288`) is not the CreateGame adaptor's, so nothing posts `EVENT_CREATEGAME_SUCCESS`, the UI script callback
+`OnOnlineCreateSession` (called by the FSM `0x4d0aa4` on that event) never runs, and the UI never reaches the point where
+it asks the invitation module (`SendGameInvite` -> `sceNpBasicSendMessageGui`) to send the invitation. The server
+cannot influence this: the success branch (`op+0x2c` list empty) does not depend on any Blaze payload. Whatever creates
+the game is some other caller that we have not identified yet (the `Handle_<name>` script-call trace and the caller
+addresses of round 3 answer this).
+
+**Server-side facts worth keeping.** The `createGame` request carries **no invitee**: `PLDL` contains only the host,
+`GTYP 'gameType20'`, `OSDK_gameMode 20`, `PMAX 2`, `PMIN 1`, `PRES 1`, `GSET 1060`, `fifaMatchupHash`, `OSDK_coop 1`.
+The server's "invited friend" is its own bookkeeping (the other logged-in player), not data from the request.
+
+**Round 3 of the trace patch (generated, selftested, not yet run on the PCs).** See "Trace patch" below. New in round 3:
+every marker also logs the **caller's LR**; a mid-function marker `0x70` in the createGame success callback logs the
+listener, the session and the **code address of the listener's `vt[0]`**; the two script-call functions `0x38aca4` /
+`0x38b110` (`Handle_<name>`, called with names like `ShowBusyIndicator`, `GameInviteValidation`, `GameInviteJoin`,
+`OnOnlineCreateSession`, ...) log the script function and its first two arguments; plus the invite receive path on the
+friend's PC (`EVENT_GAME_INVITE_RECEIVED`, USER_INVITE listeners), other GameSessionManager entry points and other
+createGame listeners. The patch file has a second, optional entry, **"FIFA eksperyment - wymus OnOnlineCreateSession
+po createGame"**: right after the listener returns it calls the UI script exactly like the FSM would
+(`OnOnlineCreateSession("EVENT_CREATEGAME_SUCCESS", <game id>)`). If the UI is waiting for that callback, the invitation
+chain (and RPCS3's friend-selection dialog for `sceNpBasicSendMessageGui`) should start.
 
 ## Latest session: 2026-10-11, late evening (trace patch, round 1 worked in real RPCS3)
 
@@ -87,6 +143,19 @@ patch (`tools/rpcs3_patch_trace_invites.yml`) that logs when selected game funct
   `setCurrentSession`, `SetPlayerAttribute`, the UI listener success/failure handlers, the Blaze
   `NotifyGameSetup`/`onNetworkCreated`/`finalizeGameCreation` handlers and the match-up FSM (`0x4d087c`, `0x4cf708`,
   `0x4d0aa4`, ...).
+- **Round 3** (54 hooks + 1 mid-function marker + 1 optional experiment): every marker also logs the caller's LR
+  (`k = 3`; r0 holds LR after the prologue's `mflr r0`), `decode_trace.py --elf` maps it to the calling function.
+  Markers `0x71`/`0x72` hook the script-call bodies `0x38aca4`/`0x38b110` and additionally dereference the variadic
+  argument array (`k = 5, 6`: words at `r6+4` / `r6+12`), so the script function name and its first two string/object
+  arguments are readable. The **mid-function marker** `0x70` (table `MIDS`) replaces one instruction (`mtctr r5` at
+  `0x2def74`) by a `bl` to a stub that preserves every register (including r11/r12 on a small extra frame), logs
+  r3/r4/r5 and executes the displaced instruction; it is only allowed where LR is dead. The **experiment** entry
+  (`EXP_*` constants) replaces `li r3,4` at `0x2def7c` by a `bl` to a 27-word stub (frame `0xC0`, volatile registers
+  only, r28 = session): `id = (session+8)->vt[0]()`, `text = fmt(id, buf, 10)` (`0x287c5c`),
+  `mgr = 0x38a5ac()`, `0x38ade4(mgr, 0, "OnOnlineCreateSession", "EVENT_CREATEGAME_SUCCESS", text, 0)`. The selftest
+  emulates it with fake callees and checks call order, arguments and preservation of r1/r2/r14-r31/cr.
+  `install_trace_patch.py` installs both entries (`--no-experiment` skips the second).
+  Free cave space left: 0x94 bytes (`0x0211E16C`..`0x0211E200`).
 - Install on **both** PCs (the friend's side shows whether anything arrives). If the game does not start after enabling
   it, untick the patch in RPCS3's Patch Manager. The first launch after a patch change recompiles the PPU (minutes).
 

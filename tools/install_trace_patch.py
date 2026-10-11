@@ -6,7 +6,9 @@
 
 Argument to folder z rpcs3.exe (tam jest podfolder patches\\patch.yml). Tworzy kopie patch.yml.bak.
 Po dopisaniu: RPCS3 -> Manage -> Patch Manager -> FIFA 17 -> BLES02233 -> zaznacz
-"FIFA trace (zaproszenia i zdarzenia UI)" i uruchom gre od nowa. Pierwsze uruchomienie kompiluje PPU (kilka minut).
+"FIFA trace (zaproszenia i zdarzenia UI)" (oraz, jesli chcesz sprobowac eksperymentu, "FIFA eksperyment - wymus
+OnOnlineCreateSession po createGame") i uruchom gre od nowa. Pierwsze uruchomienie kompiluje PPU (kilka minut).
+Opcja --no-experiment pomija wpis eksperymentu (zostaje sam znacznik).
 """
 from __future__ import annotations
 
@@ -21,18 +23,41 @@ KEY = "PPU-1243af2b292938038cdc3696755e82477122db3b"
 NAME = "FIFA trace (zaproszenia i zdarzenia UI):"
 
 
-def entry_lines() -> list[str]:
+def is_entry_header(body: str) -> bool:
+    """Naglowek wpisu patcha = linia z wcieciem dokladnie 2 spacje, konczaca sie dwukropkiem (nie komentarz)."""
+    return body.startswith("  ") and not body.startswith("   ") and body.rstrip().endswith(":") \
+        and not body.lstrip().startswith("#")
+
+
+def source_lines() -> list[str]:
     lines = open(SRC, encoding="utf-8").read().splitlines()
     start = next(i for i, ln in enumerate(lines) if ln.startswith("  " + NAME))
     return lines[start:]
 
 
+def entry_names() -> set[str]:
+    return {ln.strip() for ln in source_lines() if is_entry_header(ln)}
+
+
+def entry_lines(with_experiment: bool = True) -> list[str]:
+    lines = source_lines()
+    if not with_experiment:
+        headers = [i for i, ln in enumerate(lines) if is_entry_header(ln)]
+        if len(headers) > 1:
+            lines = lines[:headers[1]]
+            while lines and not lines[-1].strip():
+                lines.pop()
+    return lines
+
+
 def strip_entry(lines: list[str]) -> list[str]:
-    """Usuwa istniejacy wpis 'FIFA trace' (od jego naglowka do nastepnego klucza na tym samym lub wyzszym poziomie)."""
+    """Usuwa istniejace wpisy 'FIFA trace' i 'FIFA eksperyment' (od naglowka do nastepnego klucza na tym samym lub
+    wyzszym poziomie)."""
+    names = entry_names()
     out, skipping = [], False
     for ln in lines:
         body = ln.rstrip("\r\n")
-        if body.startswith("  " + NAME):
+        if is_entry_header(body) and body.strip() in names:
             skipping = True
             continue
         if skipping:
@@ -45,13 +70,13 @@ def strip_entry(lines: list[str]) -> list[str]:
     return out
 
 
-def install(path: str, remove: bool = False) -> str:
+def install(path: str, remove: bool = False, with_experiment: bool = True) -> str:
     raw = open(path, "rb").read().decode("utf-8")
     nl = "\r\n" if "\r\n" in raw else "\n"
     lines = raw.splitlines(keepends=True)
     lines = strip_entry(lines)
     if not remove:
-        new = [ln + nl for ln in entry_lines()]
+        new = [ln + nl for ln in entry_lines(with_experiment)]
         idx = next((i for i, ln in enumerate(lines) if ln.rstrip("\r\n") == KEY + ":"), None)
         if idx is None:
             if lines and not lines[-1].endswith(("\n", "\r\n")):
@@ -72,13 +97,14 @@ def main(argv: list[str]) -> int:
     if not os.path.exists(path):
         print("Nie znaleziono %s -- podaj folder z rpcs3.exe (powinien miec podfolder patches)." % path)
         return 1
-    text = install(path, remove="--remove" in argv)
+    text = install(path, remove="--remove" in argv, with_experiment="--no-experiment" not in argv)
     shutil.copyfile(path, path + ".bak")
     with open(path, "wb") as fh:
         fh.write(text.encode("utf-8"))
     print(("Usunieto wpis z " if "--remove" in argv else "Dopisano wpis do ") + path + "  (kopia: patch.yml.bak)")
     if "--remove" not in argv:
-        print("Teraz: RPCS3 -> Manage -> Patch Manager -> FIFA 17 -> BLES02233 v01.00 -> zaznacz '%s'" % NAME.rstrip(":"))
+        print("Teraz: RPCS3 -> Manage -> Patch Manager -> FIFA 17 -> BLES02233 v01.00 -> zaznacz: %s" %
+              ", ".join("'%s'" % n.rstrip(":") for n in sorted(entry_names())))
     return 0
 
 

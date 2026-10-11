@@ -11,15 +11,24 @@ Lata dopisuje do RPCS3.log linie typu
 (iTime=0x5884....), wiec nasze znaczniki (zaczynaja sie od 0xfa) sa latwe do odroznienia.
 
 Kodowanie iTime:  0xFA | id(8 bitow) | k(16 bitow) | wartosc(32 bity)
-  id = numer znacznika (tabela TARGETS), k = ktory argument (0 = r3, 1 = r4, 2 = r5), wartosc = jego dolne 32 bity.
-Dla znacznika zdarzen (id 0x01) logowany jest tylko r4 (k=1) = wskaznik na nazwe zdarzenia (tools/decode_trace.py
-zamienia go na tekst "EVENT_...").
+  id = numer znacznika (tabela TARGETS), k = ktory argument (0 = r3, 1 = r4, 2 = r5, 3 = LR wywolujacego, 4 = r6),
+  wartosc = jego dolne 32 bity. LR to adres powrotu = "kto nas wolal" (tools/decode_trace.py zamienia go na funkcje).
+Dla znacznika zdarzen (id 0x01) logowany jest r4 (k=1) = wskaznik na nazwe zdarzenia (decode_trace zamienia go na
+tekst "EVENT_...") oraz LR (k=3) = kto zglosil zdarzenie.
+
+Runda 3 (2026-10-12): oprocz wejsc w funkcje (T+4 = `bl _savegpr`) sa tez znaczniki "w srodku funkcji" (tabela MIDS):
+podmieniamy jedna instrukcje A na `bl stub`; stub zachowuje WSZYSTKIE rejestry, loguje r3/r4/r5, wykonuje podmieniona
+instrukcje i wraca na A+4 (dozwolone tylko tam, gdzie LR jest martwy, tj. tuz przed `bdnzctrl`/`bl`).
 
 Mechanizm (bezpieczny dla rekompilatora PPU RPCS3): wszystkie obserwowane funkcje maja na poczatku
     mflr r0 ; bl _savegpr_N
 Podmieniamy TYLKO drugie slowo (bl _savegpr_N -> bl S_k). S_k zapisuje LR, wola wspolna procedure `common`
 (zachowuje WSZYSTKIE rejestry r0-r12, f1-f13, LR, CR, CTR), potem przywraca LR i robi `b _savegpr_N`, wiec dla
 oryginalnej funkcji nic sie nie zmienia. Kod i stuby leza w nieuzywanym, wyzerowanym obszarze segmentu kodu.
+
+Drugi, OPCJONALNY wpis w tym samym pliku ("eksperyment") wymusza po udanym createGame wywolanie skryptu UI
+`OnOnlineCreateSession("EVENT_CREATEGAME_SUCCESS")` -- dokladnie to, co zrobilby FSM, gdyby listener wyslal
+EVENT_CREATEGAME_SUCCESS (patrz EXPERIMENT_* ponizej). Jest niezalezny od znacznikow (osobny wpis w Patch Managerze).
 
 Uzycie:
     python tools/make_trace_patch.py            # zapisuje tools/rpcs3_patch_trace_invites.yml
@@ -40,9 +49,10 @@ RTC_STUB = 0x01EA2160             # import cellRtcSetTime_t (patrz RPCS3.log: "c
 PPU_HASH = "PPU-1243af2b292938038cdc3696755e82477122db3b"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rpcs3_patch_trace_invites.yml")
 
-# (id, nazwa, adres funkcji T, adres pomocnika H z "bl H" w T+4, tryb: 3 = loguj r3,r4,r5; 1 = tylko r4)
+# (id, nazwa, adres funkcji T, adres pomocnika H z "bl H" w T+4, tryb = klucz MODES: 3 = r3,r4,r5,LR; 5 = r3,r4,r5,r6,LR;
+#  1 = r4; 6 = r4,LR; 7 = r5 (nazwa), pierwsze dwa argumenty wariadyczne, LR)
 TARGETS = [
-    (0x01, "EVT  post_event(this, nazwa_zdarzenia, dane)", 0x015FFB68, 0x01955538, 1),
+    (0x01, "EVT  post_event(this, nazwa_zdarzenia, dane)", 0x015FFB68, 0x01955538, 6),
     (0x10, "adaptor SendGameInvite (UI -> C++)", 0x016491B4, 0x01955530, 3),
     (0x11, "adaptor SendMultipleGameInvites (UI -> C++)", 0x01649264, 0x01955524, 3),
     (0x12, "ginv::SendGameInvite", 0x00301AD4, 0x01955528, 3),
@@ -82,10 +92,41 @@ TARGETS = [
     (0x62, "FSM poczekalni: 4cf59c", 0x004CF59C, 0x01955530, 3),
     (0x63, "FifaOnline::StartInviteFlowPrep (4cf1f8)", 0x004CF1F8, 0x01955538, 3),
     (0x64, "GameInviteScreenAbort (4cf2f8)", 0x004CF2F8, 0x0195553C, 3),
+    # --- runda 3: kto wola createGame i jaki listener dostaje wynik; wywolania silnik -> skrypty UI ---
+    (0x71, "UI skrypt: wywolanie funkcji 'Handle_<nazwa>' (napisy) (38aca4)", 0x0038ACA4, 0x01955538, 7),
+    (0x72, "UI skrypt: wywolanie funkcji 'Handle_<nazwa>' (obiekt) (38b110)", 0x0038B110, 0x01955538, 7),
+    (0x73, "gses: wynik operacji 2df808", 0x002DF808, 0x01955538, 3),
+    (0x74, "gses: wynik operacji 2df978", 0x002DF978, 0x01955540, 3),
+    (0x75, "gses: wynik operacji 2dfb20", 0x002DFB20, 0x01955540, 3),
+    (0x76, "EVENT_GAME_INVITE_RECEIVED: nadawca zdarzenia (1649774)", 0x01649774, 0x01955544, 3),
+    (0x77, "listener zaproszen: USER_INVITE sukces (16495b4)", 0x016495B4, 0x01955540, 3),
+    (0x78, "listener zaproszen: USER_INVITE porazka (164964c)", 0x0164964C, 0x01955540, 3),
+    (0x79, "EVENT_MATCHUP_SUCCESS: nadawca zdarzenia (1625504)", 0x01625504, 0x0195553C, 3),
+    (0x7A, "inny listener createGame (1624b68)", 0x01624B68, 0x0195553C, 3),
+    (0x7B, "inny listener createGame (1624c14)", 0x01624C14, 0x0195553C, 3),
+    (0x7C, "inny listener createGame (1624cf0)", 0x01624CF0, 0x01955544, 3),
+    (0x7D, "GameSessionManager vt+0x10 (28fdfc)", 0x0028FDFC, 0x01955520, 3),
+    (0x7E, "GameSessionManager JoinGame? (290b18)", 0x00290B18, 0x0195552C, 3),
+    (0x7F, "GameSessionManager JoinGame? (290dd8)", 0x00290DD8, 0x0195552C, 3),
+]
+
+# Znaczniki w srodku funkcji: (id, nazwa, adres instrukcji A, jej slowo, tryb).  Podmieniana instrukcja musi byc
+# wykonywalna poza kontekstem (bez rozgalezien wzgledem PC) i LR musi byc w A martwy.
+MIDS = [
+    (0x70, "createGame (GSMR) tuz przed `mtctr r5`: r3=listener, r4=sesja, r5=KOD listenera, ktory zaraz zostanie wywolany",
+     0x002DEF74, 0x7CA903A6, 3),                                  # mtctr r5 (a potem bdnzctrl @ 2def78)
 ]
 
 
 # ---------------------------------------------------------------- mini asembler (tylko uzywane instrukcje)
+# ---------------------------------------------------------------- EKSPERYMENT: wymus OnOnlineCreateSession
+EXP_NAME = "FIFA eksperyment - wymus OnOnlineCreateSession po createGame"
+EXP_AT = 0x002DEF7C                  # `li r3,4` tuz po wywolaniu listenera w callbacku createGame (2dee08)
+EXP_DISPLACED = 0x38600004
+EXP_FN_SCRIPT_MGR, EXP_FN_FMT, EXP_FN_CALL_SCRIPT = 0x0038A5AC, 0x00287C5C, 0x0038ADE4
+EXP_STR_FN, EXP_STR_EVT = 0x01F00A6C, 0x01EFFC8C        # "OnOnlineCreateSession", "EVENT_CREATEGAME_SUCCESS"
+
+
 def _ds(op, rs, ra, d, xo):
     return (op << 26) | (rs << 21) | (ra << 16) | (d & 0xFFFC) | xo
 
@@ -108,6 +149,10 @@ def mtcrf_all(rs): return 0x7C000120 | (rs << 21) | (0xFF << 12)
 def mfctr(rd): return 0x7C0902A6 | (rd << 21)
 def mtctr(rs): return 0x7C0903A6 | (rs << 21)
 BLR = 0x4E800020
+BCTRL = 0x4E800421
+
+
+def li(rd, imm): return addi(rd, 0, imm)
 
 
 def _md(rs, ra, sh, mbme, xo):
@@ -130,7 +175,14 @@ FRAME = 0x1C0
 OFF_R0, OFF_R3 = 0x70, 0x78         # r3..r12 w 0x78 + 8*(n-3)
 OFF_CR, OFF_CTR, OFF_F1, OFF_BUF = 0xC8, 0xD0, 0xD8, 0x140
 OFF_LR = FRAME + 0x10
-ARG_OFF = {0: OFF_R3, 1: OFF_R3 + 8, 2: OFF_R3 + 16}          # r3, r4, r5
+ARG_OFF = {0: OFF_R3, 1: OFF_R3 + 8, 2: OFF_R3 + 16,          # r3, r4, r5
+           3: OFF_R0,                                          # LR wywolujacego (po `mflr r0` w prologu)
+           4: OFF_R3 + 24}                                     # r6
+# k = 5, 6: slowo spod adresu r6+4 / r6+12 (r6 = wskaznik na tablice argumentow wariadycznych, 8-bajtowe sloty
+# z 32-bitowym wskaznikiem w dolnej polowie) -- uzywane tylko przez funkcje 'Handle_<nazwa>' (38aca4, 38b110)
+DEREF = {5: 4, 6: 12}
+# tryb -> ktore argumenty logowac (w tej kolejnosci)
+MODES = {1: (1,), 3: (0, 1, 2, 3), 5: (0, 1, 2, 4, 3), 6: (1, 3), 7: (2, 5, 6, 3)}
 
 
 def build_common(base, args):
@@ -151,7 +203,11 @@ def build_common(base, args):
         emit(clrldi(10, 10, 32))
         emit(ori(9, 10, k))
         emit(sldi(9, 9, 32))
-        emit(ld(8, ARG_OFF[k], 1))
+        if k in DEREF:
+            emit(ld(8, ARG_OFF[4], 1))                    # r6
+            emit(lwz(8, DEREF[k], 8))
+        else:
+            emit(ld(8, ARG_OFF[k], 1))
         emit(clrldi(8, 8, 32))
         emit(or_(4, 9, 8))
         emit(addi(3, 1, OFF_BUF))
@@ -177,32 +233,88 @@ def build_stub(base, marker_id, common, helper):
     return code
 
 
+MID_FRAME = 0x30
+
+
+def build_mid_stub(base, marker_id, common, displaced):
+    """Stub dla znacznika w srodku funkcji. Wejscie przez `bl` z A (LR = A+4). r11/r12 sa nietykalne dla oryginalu,
+    wiec zapisujemy je na krotkiej ramce, a po `common` przywracamy. Podmieniona instrukcja jest wykonywana na koncu."""
+    code = [stdu(1, -MID_FRAME, 1), std(11, 0x20, 1), std(12, 0x28, 1),
+            lis(11, 0xFA00 | marker_id), mflr(12), 0, mtlr(12),
+            ld(11, 0x20, 1), ld(12, 0x28, 1), addi(1, 1, MID_FRAME), displaced, BLR]
+    code[5] = branch(base + 20, common, True)
+    return code
+
+
+EXP_FRAME = 0xC0
+
+
+def build_exp_stub(base):
+    """Odtwarza to, co FSM (4d0aa4) robi po EVENT_CREATEGAME_SUCCESS: OnOnlineCreateSession("EVENT_CREATEGAME_SUCCESS",
+    <id sesji jako tekst>). Wejscie przez `bl` z EXP_AT (po powrocie z listenera rejestry ulotne sa martwe, r28 = sesja)."""
+    c = []
+    e = c.append
+    e(stdu(1, -EXP_FRAME, 1))
+    e(mflr(0)); e(std(0, EXP_FRAME + 0x10, 1))
+    e(addi(3, 28, 8))                       # r3 = sesja + 8
+    e(lwz(4, 8, 28)); e(lwz(4, 0, 4)); e(lwz(4, 0, 4))    # kod slotu 0 vtable podobiektu
+    e(mtctr(4)); e(BCTRL)                   # r3 = id gry
+    e(addi(4, 1, 0x70)); e(li(5, 10))
+    e(0); idx_fmt = len(c) - 1
+    e(std(3, 0xB0, 1))                      # wskaznik na tekst
+    e(0); idx_mgr = len(c) - 1
+    e(li(4, 0))
+    e(lis(5, EXP_STR_FN >> 16)); e(ori(5, 5, EXP_STR_FN & 0xFFFF))
+    e(lis(6, EXP_STR_EVT >> 16)); e(ori(6, 6, EXP_STR_EVT & 0xFFFF))
+    e(ld(7, 0xB0, 1)); e(li(8, 0))
+    e(0); idx_call = len(c) - 1
+    e(ld(0, EXP_FRAME + 0x10, 1)); e(mtlr(0))
+    e(addi(1, 1, EXP_FRAME))
+    e(EXP_DISPLACED); e(BLR)
+    c[idx_fmt] = branch(base + 4 * idx_fmt, EXP_FN_FMT, True)
+    c[idx_mgr] = branch(base + 4 * idx_mgr, EXP_FN_SCRIPT_MGR, True)
+    c[idx_call] = branch(base + 4 * idx_call, EXP_FN_CALL_SCRIPT, True)
+    return c
+
+
+def build_exp():
+    """-> (slowa (adres, slowo), (adres_podmiany, slowo_bl, stub))"""
+    words, hooks, (commons, end) = build_all()
+    base = (end + 15) & ~15
+    sw = build_exp_stub(base)
+    assert base + 4 * len(sw) <= CAVE_END, hex(base + 4 * len(sw))
+    return [(base + 4 * i, w) for i, w in enumerate(sw)], (EXP_AT, branch(EXP_AT, base, True), base)
+
+
 def build_all():
-    """-> (lista (adres, slowo) kodu w jaskini, lista (adres, slowo) podmian wejsc funkcji, mapa opisow)"""
-    words, hooks, notes = [], [], {}
+    """-> (lista (adres, slowo) kodu w jaskini, lista (adres, slowo, nazwa, id, stub) podmian, (commons, koniec))"""
+    words, hooks = [], []
     addr = CAVE
-    common3 = addr
-    c3 = build_common(common3, (0, 1, 2))
-    words += [(common3 + 4 * i, w) for i, w in enumerate(c3)]
-    addr = common3 + 4 * len(c3)
-    addr = (addr + 15) & ~15
-    common1 = addr
-    c1 = build_common(common1, (1,))
-    words += [(common1 + 4 * i, w) for i, w in enumerate(c1)]
-    addr = common1 + 4 * len(c1)
-    addr = (addr + 15) & ~15
+    commons = {}
+    for mode in sorted({m for *_, m in TARGETS} | {m for *_, m in MIDS}):
+        c = build_common(addr, MODES[mode])
+        words += [(addr + 4 * i, w) for i, w in enumerate(c)]
+        commons[mode] = addr
+        addr = (addr + 4 * len(c) + 15) & ~15
     for mid, name, target, helper, mode in TARGETS:
         stub = addr
-        sw = build_stub(stub, mid, common3 if mode == 3 else common1, helper)
+        sw = build_stub(stub, mid, commons[mode], helper)
         words += [(stub + 4 * i, w) for i, w in enumerate(sw)]
         hooks.append((target + 4, branch(target + 4, stub, True), name, mid, stub))
-        addr = (stub + 4 * len(sw) + 15) & ~15
+        addr = stub + 4 * len(sw)
+    for mid, name, at, displaced, mode in MIDS:
+        stub = addr
+        sw = build_mid_stub(stub, mid, commons[mode], displaced)
+        words += [(stub + 4 * i, w) for i, w in enumerate(sw)]
+        hooks.append((at, branch(at, stub, True), name, mid, stub))
+        addr = stub + 4 * len(sw)
+    addr = (addr + 15) & ~15
     assert addr <= CAVE_END, hex(addr)
-    return words, hooks, (common3, common1, addr)
+    return words, hooks, (commons, addr)
 
 
 def render_yaml():
-    words, hooks, (common3, common1, end) = build_all()
+    words, hooks, (commons, end) = build_all()
     out = []
     w = out.append
     w("# GENEROWANE przez tools/make_trace_patch.py -- nie edytuj recznie.")
@@ -212,12 +324,15 @@ def render_yaml():
     w("# Jak uzyc (na OBU komputerach): otworz patch.yml RPCS3 (folder patches), znajdz klucz")
     w("#   %s:" % PPU_HASH)
     w("# (ten sam, pod ktorym masz juz inne patche) i wklej PONIZSZY wpis POD TYM KLUCZEM (z zachowaniem wciec).")
-    w("# Potem: Patch Manager -> FIFA 17 -> BLES02233 v.01.00 -> zaznacz 'FIFA trace (zaproszenia i zdarzenia UI)'.")
+    w("# Potem: Patch Manager -> FIFA 17 -> BLES02233 v.01.00 -> zaznacz 'FIFA trace (zaproszenia i zdarzenia UI)'")
+    w("# oraz (tylko jesli chcesz sprobowac) 'FIFA eksperyment - wymus OnOnlineCreateSession po createGame'.")
     w("# Pierwsze uruchomienie po zmianie kompiluje PPU od nowa (kilka minut) -- to normalne.")
     w("#")
     w("# Znaczniki:")
     for mid, name, target, helper, mode in TARGETS:
         w("#   0x%02X  0x%08X  %s" % (mid, target, name))
+    for mid, name, at, displaced, mode in MIDS:
+        w("#   0x%02X  0x%08X  [w srodku funkcji] %s" % (mid, at, name))
     w("")
     w("  FIFA trace (zaproszenia i zdarzenia UI):")
     w("    Games:")
@@ -227,11 +342,24 @@ def render_yaml():
     w('    Notes: "Znaczniki diagnostyczne: log cellRtcSetTime_t z iTime=0xFA... przy wejsciu w funkcje zaproszen / zdarzen UI"')
     w('    Patch Version: "1.0"')
     w("    Patch:")
-    w("          # --- podmiana drugiego slowa (bl _savegpr) w funkcjach na bl do stuba ---")
+    w("          # --- podmiana drugiego slowa (bl _savegpr) w funkcjach / jednej instrukcji w srodku funkcji na bl do stuba ---")
     for target4, word, name, mid, stub in hooks:
         w("          - [ be32, 0x%08X, 0x%08X ]   # %s -> stub 0x%08X" % (target4, word, name, stub))
     w("          # --- kod w jaskini 0x%08X..0x%08X ---" % (CAVE, end))
     for a, wd in words:
+        w("          - [ be32, 0x%08X, 0x%08X ]" % (a, wd))
+    exp_words, (exp_at, exp_bl, exp_stub) = build_exp()
+    w("")
+    w("  %s:" % EXP_NAME)
+    w("    Games:")
+    w("      FIFA 17:")
+    w('        BLES02233: [ "01.00" ]')
+    w('    Author: "custom"')
+    w('    Notes: "Po udanym createGame (callback 2dee08) wywoluje skrypt UI OnOnlineCreateSession(EVENT_CREATEGAME_SUCCESS) -- to, czego brakuje, bo listener nie wysyla zdarzenia"')
+    w('    Patch Version: "1.0"')
+    w("    Patch:")
+    w("          - [ be32, 0x%08X, 0x%08X ]   # 2def7c: li r3,4 -> bl stub 0x%08X" % (exp_at, exp_bl, exp_stub))
+    for a, wd in exp_words:
         w("          - [ be32, 0x%08X, 0x%08X ]" % (a, wd))
     return "\n".join(out) + "\n"
 
@@ -361,62 +489,161 @@ class Emu:
         elif op == 19 and ((w >> 1) & 0x3FF) == 16:          # blr
             self.pc = self.lr
             return
+        elif op == 19 and ((w >> 1) & 0x3FF) == 528:         # bctr / bctrl
+            if w & 1: self.lr = nxt
+            self.pc = self.ctr & ~3
+            return
         else:
             raise RuntimeError("nieobslugiwany opcode %d @0x%x (0x%08x)" % (op, self.pc, w))
         self.pc = nxt
 
 
+def _fresh_emu(words, rng):
+    e = Emu()
+    for a, wd in words:
+        e.w(a, struct.pack(">I", wd))
+    for n in range(3, 13):
+        e.r[n] = rng.getrandbits(64)
+    for n in range(1, 14):
+        e.f[n] = rng.getrandbits(64)
+    e.ctr = rng.getrandbits(64)
+    e.cr = rng.getrandbits(32)
+    e.r[1] = 0xD0010000 - 0x200
+    return e
+
+
+def _make_rtc(logged, rng):
+    def rtc(emu):
+        buf, itime = emu.r[3], emu.r[4]
+        assert emu.rd(buf, 16) is not None
+        logged.append(itime)
+        # jak prawdziwy import: zapisuje w ramce wolajacego (0x20, 0x28) i niszczy rejestry zmienne
+        emu.st64(emu.r[1] + 0x20, emu.lr)
+        emu.st64(emu.r[1] + 0x28, 0xBADBADBAD)
+        for n in list(range(3, 13)) + [0]:
+            emu.r[n] = rng.getrandbits(64)
+        for n in range(0, 14):
+            emu.f[n] = rng.getrandbits(64)
+        emu.ctr = rng.getrandbits(64)
+        emu.cr = rng.getrandbits(32)
+        emu.pc = emu.lr
+    return rtc
+
+
+def _want_log(mid, mode, regs, lr_value, mem=None):
+    """regs = stan rejestrow przed wejsciem; mem = emulator (do odczytu slow spod r6+4/r6+12)."""
+    src = {0: regs[3], 1: regs[4], 2: regs[5], 3: lr_value, 4: regs[6]}
+    if mem is not None:
+        for k, off in DEREF.items():
+            src[k] = struct.unpack(">I", mem.rd((regs[6] + off) & 0xFFFFFFFFFFFFFFFF, 4))[0]
+    return [((0xFA000000 | (mid << 16) | k) << 32) | (src[k] & 0xFFFFFFFF) for k in MODES[mode]]
+
+
+def _yaml_check():
+    """Wpisy musza byc poprawnym YAML-em (RPCS3 odrzuci caly patch.yml przy bledzie, np. ': ' w nazwie wpisu)."""
+    try:
+        import yaml
+    except Exception:
+        print("PyYAML niedostepny -- pomijam sprawdzenie skladni YAML")
+        return True
+    doc = yaml.safe_load("%s:\n%s" % (PPU_HASH, render_yaml()))
+    entries = doc[PPU_HASH]
+    problems = []
+    for name in ("FIFA trace (zaproszenia i zdarzenia UI)", EXP_NAME):
+        e = entries.get(name)
+        if not e or not e.get("Patch") or e["Games"]["FIFA 17"]["BLES02233"] != ["01.00"]:
+            problems.append(name)
+    for e in entries.values():
+        for row in e["Patch"]:
+            if row[0] != "be32" or not isinstance(row[1], int) or not isinstance(row[2], int):
+                problems.append("wiersz %r" % (row,))
+                break
+    print("%-4s skladnia YAML i struktura wpisow %s" % ("OK" if not problems else "BLAD", ",".join(problems)))
+    return not problems
+
+
+def _exp_selftest():
+    """Eksperyment: kolejnosc i argumenty wywolan oraz zachowanie rejestrow nieulotnych (r14-r31, f14-f31, cr2-4)."""
+    rng = random.Random(77)
+    exp_words, (at, bl, stub) = build_exp()
+    e = _fresh_emu(exp_words, rng)
+    e.w(at, struct.pack(">I", bl))
+    sess, vptr, opd, code = 0x10D9E310, 0x20000000, 0x20000100, 0x20000200
+    e.w(sess + 8, struct.pack(">I", vptr))
+    e.w(vptr, struct.pack(">I", opd))
+    e.w(opd, struct.pack(">I", code))
+    calls = []
+
+    def hook(name, ret):
+        def f(emu):
+            calls.append((name, [emu.r[n] & 0xFFFFFFFF for n in range(3, 9)]))
+            emu.r[3] = ret
+            for n in list(range(4, 13)) + [0]:           # funkcje wolane niszcza rejestry ulotne
+                emu.r[n] = rng.getrandbits(64)
+            emu.pc = emu.lr
+        return f
+    e.hooks[code] = hook("id_gry", 0x1234)
+    e.hooks[EXP_FN_FMT] = hook("fmt", 0xD0AAAA00)
+    e.hooks[EXP_FN_SCRIPT_MGR] = hook("mgr", 0x0BADF00D)
+    e.hooks[EXP_FN_CALL_SCRIPT] = hook("wywolaj_skrypt", 0)
+    e.r[28] = sess
+    for n in list(range(14, 28)) + [29, 30, 31]:
+        e.r[n] = rng.getrandbits(64)
+    before = (list(e.r), list(e.f), e.cr)
+    e.lr = at + 4
+    e.pc = stub
+    e.hooks[at + 4] = lambda emu: (_ for _ in ()).throw(StopIteration)
+    try:
+        e.run(at + 4)
+    except StopIteration:
+        pass
+    problems = []
+    names = [c[0] for c in calls]
+    if names != ["id_gry", "fmt", "mgr", "wywolaj_skrypt"]:
+        problems.append("kolejnosc %s" % names)
+    else:
+        if calls[0][1][0] != sess + 8: problems.append("r3(id)")
+        if calls[1][1][:3] != [0x1234, (before[0][1] - EXP_FRAME + 0x70) & 0xFFFFFFFF, 10]: problems.append("fmt(args)")
+        a = calls[3][1]
+        if a != [0x0BADF00D, 0, EXP_STR_FN, EXP_STR_EVT, 0xD0AAAA00, 0]: problems.append("skrypt(args)=%s" % a)
+    if e.pc != at + 4: problems.append("pc=%x" % e.pc)
+    if e.r[3] != 4: problems.append("r3 (podmieniona instrukcja)")
+    if e.r[1] != before[0][1]: problems.append("r1")
+    for n in list(range(14, 32)) + [2]:
+        if e.r[n] != before[0][n]: problems.append("r%d" % n)
+    if e.cr != before[2]: problems.append("cr")
+    print("%-4s eksperyment: OnOnlineCreateSession (stub 0x%08X, %d slow) %s" % (
+        "OK" if not problems else "BLAD", stub, len(exp_words), ",".join(problems)))
+    return not problems
+
+
 def selftest():
-    words, hooks, (common3, common1, end) = build_all()
-    ok = _capstone_check(words + [(a, w) for a, w, *_ in hooks])
+    words, hooks, (commons, end) = build_all()
+    exp_words, (exp_at, exp_bl, _stub) = build_exp()
+    ok = _capstone_check(words + [(a, w) for a, w, *_ in hooks] + exp_words + [(exp_at, exp_bl)])
     rng = random.Random(1234)
     for mid, name, target, helper, mode in TARGETS:
-        e = Emu()
-        for a, wd in words:
-            e.w(a, struct.pack(">I", wd))
+        logged = []
+        e = _fresh_emu(words, rng)
         hook = [h for h in hooks if h[0] == target + 4][0]
         e.w(target + 4, struct.pack(">I", hook[1]))
-        logged = []
-        stack_top = 0xD0010000
-
-        def rtc(emu):
-            buf, itime = emu.r[3], emu.r[4]
-            assert emu.rd(buf, 16) is not None
-            logged.append(itime)
-            # jak prawdziwy import: zapisuje w ramce wolajacego (0x20, 0x28) i niszczy rejestry zmienne
-            emu.st64(emu.r[1] + 0x20, emu.lr)
-            emu.st64(emu.r[1] + 0x28, 0xBADBADBAD)
-            for n in list(range(3, 13)) + [0]:
-                emu.r[n] = rng.getrandbits(64)
-            for n in range(0, 14):
-                emu.f[n] = rng.getrandbits(64)
-            emu.ctr = rng.getrandbits(64)
-            emu.cr = rng.getrandbits(32)
-            emu.pc = emu.lr
-
-        e.hooks[RTC_STUB] = rtc
+        e.hooks[RTC_STUB] = _make_rtc(logged, rng)
         e.hooks[helper] = lambda emu: (_ for _ in ()).throw(StopIteration)
-        for n in range(3, 11):
-            e.r[n] = rng.getrandbits(64)
-        e.r[11] = rng.getrandbits(64)
-        e.r[12] = rng.getrandbits(64)
-        e.r[1] = stack_top - 0x200
+        for off in DEREF.values():
+            e.w((e.r[6] + off) & 0xFFFFFFFFFFFFFFFF, struct.pack(">I", rng.getrandbits(32)))
         caller_lr = 0x00123450
         e.lr = caller_lr
         e.r[0] = caller_lr                    # wykonane przez 'mflr r0' w funkcji
-        for n in range(1, 14):
-            e.f[n] = rng.getrandbits(64)
-        e.ctr = rng.getrandbits(64)
-        e.cr = rng.getrandbits(32)
+        e.r[11] = rng.getrandbits(64)
+        e.r[12] = rng.getrandbits(64)
         before = (list(e.r), list(e.f), e.ctr, e.cr)
         e.lr = target + 8                     # 'bl S' z T+4
-        e.pc = [h for h in hooks if h[0] == target + 4][0][4]
+        e.pc = hook[4]
         # wejscie w stub S_k odbywa sie przez 'bl' z T+4 -- symulujemy skok bezposrednio
         try:
             e.run(helper)
         except StopIteration:
             pass
-        assert e.pc == helper or True
         # stan przy wejsciu do pomocnika musi zgadzac sie z oryginalem (poza r11/r12)
         problems = []
         if e.r[0] != caller_lr: problems.append("r0")
@@ -428,20 +655,59 @@ def selftest():
         if e.ctr != before[2]: problems.append("ctr")
         if e.cr != before[3]: problems.append("cr")
         if e.lr != target + 8: problems.append("lr=%x" % e.lr)
-        args = (before[0][3], before[0][4], before[0][5])
-        ks = (1,) if mode == 1 else (0, 1, 2)
-        want = [((0xFA000000 | (mid << 16) | k) << 32) | (args[k] & 0xFFFFFFFF) for k in ks]
+        want = _want_log(mid, mode, before[0], caller_lr, e)
         if logged != want:
             problems.append("log %s != %s" % ([hex(x) for x in logged], [hex(x) for x in want]))
-        print("%-4s 0x%02X 0x%08X %-52s %s" % ("OK" if not problems else "BLAD", mid, target, name,
+        print("%-4s 0x%02X 0x%08X %-52s %s" % ("OK" if not problems else "BLAD", mid, target, name[:52],
                                               ",".join(problems)))
         ok = ok and not problems
-    print("jaskinia: 0x%08X..0x%08X (%d bajtow, limit %d)" % (CAVE, end, end - CAVE, CAVE_END - CAVE))
+    for mid, name, at, displaced, mode in MIDS:
+        logged = []
+        e = _fresh_emu(words, rng)
+        hook = [h for h in hooks if h[0] == at][0]
+        e.w(at, struct.pack(">I", hook[1]))
+        e.hooks[RTC_STUB] = _make_rtc(logged, rng)
+        for n in (0, 11, 12):
+            e.r[n] = rng.getrandbits(64)
+        e.lr = rng.getrandbits(32) & ~3          # LR sprzed `bl` (martwy -- po `bl` bedzie A+4)
+        e.hooks[at + 4] = lambda emu: (_ for _ in ()).throw(StopIteration)
+        before = (list(e.r), list(e.f), e.ctr, e.cr)
+        # wzorzec: wykonaj ta sama podmieniona instrukcje na kopii stanu
+        ref = _fresh_emu([], rng)
+        ref.r, ref.f, ref.ctr, ref.cr = list(before[0]), list(before[1]), before[2], before[3]
+        ref.w(at, struct.pack(">I", displaced))
+        ref.pc = at
+        ref.step()
+        e.lr = at + 4                            # skutek `bl stub` z A
+        e.pc = hook[4]
+        try:
+            e.run(at + 4)
+        except StopIteration:
+            pass
+        problems = []
+        if e.pc != at + 4: problems.append("pc=%x" % e.pc)
+        for n in range(0, 32):
+            if e.r[n] != ref.r[n]: problems.append("r%d" % n)
+        for n in range(1, 14):
+            if e.f[n] != before[1][n]: problems.append("f%d" % n)
+        if e.ctr != ref.ctr: problems.append("ctr")
+        if e.cr != before[3]: problems.append("cr")
+        want = _want_log(mid, mode, before[0], before[0][0], e)
+        if logged != want:
+            problems.append("log %s != %s" % ([hex(x) for x in logged], [hex(x) for x in want]))
+        print("%-4s 0x%02X 0x%08X %-52s %s" % ("OK" if not problems else "BLAD", mid, at, "[srodek] " + name[:43],
+                                              ",".join(problems)))
+        ok = ok and not problems
+    ok = _exp_selftest() and ok
+    ok = _yaml_check() and ok
+    exp_end = exp_words[-1][0] + 4
+    print("jaskinia: 0x%08X..0x%08X (%d bajtow, limit %d)" % (CAVE, exp_end, exp_end - CAVE, CAVE_END - CAVE))
     return ok
 
 
 def verify_elf(path):
-    """Sprawdza na prawdziwym EBOOT.ELF, ze kazdy cel zaczyna sie od `mflr r0` i ma w T+4 `bl H` z H z tabeli."""
+    """Sprawdza na prawdziwym EBOOT.ELF: kazdy cel zaczyna sie od `mflr r0` i ma w T+4 `bl H` z H z tabeli;
+    w kazdym znaczniku w srodku funkcji pod adresem A stoi dokladnie podmieniana instrukcja."""
     d = open(path, "rb").read()
     phoff = struct.unpack(">Q", d[32:40])[0]
     n = struct.unpack(">H", d[56:58])[0]
@@ -467,7 +733,19 @@ def verify_elf(path):
         if not ok:
             bad += 1
             print("NIEZGODNE 0x%02X %s 0x%08X: %08X %08X" % (mid, name, t, w0, w1))
-    print("sprawdzono %d celow na %s, niezgodnych: %d" % (len(TARGETS), path, bad))
+    for mid, name, at, displaced, mode in MIDS:
+        if u32(at) != displaced:
+            bad += 1
+            print("NIEZGODNE 0x%02X %s 0x%08X: jest %08X, oczekiwano %08X" % (mid, name, at, u32(at), displaced))
+    if u32(EXP_AT) != EXP_DISPLACED:
+        bad += 1
+        print("NIEZGODNE eksperyment 0x%08X: jest %08X, oczekiwano %08X" % (EXP_AT, u32(EXP_AT), EXP_DISPLACED))
+    for a, w in build_all()[0] + build_exp()[0]:      # jaskinia musi byc pusta (zera) w oryginale
+        if u32(a) != 0:
+            bad += 1
+            print("JASKINIA NIE JEST PUSTA @0x%08X: %08X" % (a, u32(a)))
+            break
+    print("sprawdzono %d celow + %d znacznikow w srodku na %s, niezgodnych: %d" % (len(TARGETS), len(MIDS), path, bad))
     return bad == 0
 
 
