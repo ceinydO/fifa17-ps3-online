@@ -38,12 +38,12 @@ class Config:
     # Test na zywo 2026-10-09: z wartoscia 2 (i INITIALIZING) host po NotifyGameSetup zbindowal UDP 3659/9999,
     # ale NIE wyslal ani updateMeshConnection, ani finalizeGameCreation -- stary przebieg (PRE_GAME + host 4) wysylal.
     gm_host_initial_state: int = 4
-    # Poziom ksztaltu pierwszego NotifyGameSetup dla hosta (patrz gamemgr.LEVELS; 1 = bajt w bajt jak stary,
-    # dzialajacy przebieg ... 6 = docelowy z INITIALIZING):
+    # Poziom ksztaltu pierwszego NotifyGameSetup dla hosta (patrz gamemgr.LEVELS; 1 = host sam w starym, dzialajacym
+    # ksztalcie ... 5 = docelowy z INITIALIZING):
     #   0  = automatycznie (drabinka): start od 1; po kazdym createGame, ktory doszedl do finalizeGameCreation hosta,
     #        nastepny createGame probuje poziom wyzej; po porazce wraca do najnowszego dzialajacego. Stan w
     #        state/gm_variant.json (przetrwa restart serwera; skasuj plik, zeby zaczac od nowa).
-    #   1..6 = wymuszony poziom, -1 = uzyj pojedynczych przelacznikow gm_deferred_pregame/gm_faithful_flow/
+    #   1..5 = wymuszony poziom, -1 = uzyj pojedynczych przelacznikow gm_deferred_pregame/gm_faithful_flow/
     #        gm_host_initial_state z tego pliku.
     gm_variant: int = 0
     # Po FINALIZE_WATCHDOG_SECONDS bez finalizeGameCreation hosta serwer usuwa gre (NotifyGameRemoved), zeby klient

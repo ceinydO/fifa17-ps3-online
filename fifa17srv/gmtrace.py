@@ -14,6 +14,9 @@ from pathlib import Path
 from . import tdf
 
 WINDOW_SECONDS = 45.0
+# Komponenty zawsze logowane (takze po oknie 45 s): GameManager (joinGame kolegi po zaakceptowaniu zaproszenia moze
+# przyjsc minute po createGame) i Messaging (zaproszenia przez Blaze).
+ALWAYS_COMPONENTS = (0x0004, 0x000F)
 
 _LOCK = threading.Lock()
 _PATH: Path | None = None
@@ -70,8 +73,9 @@ def begin(host: str, gid: int, level, name: str, why: str, about: str, req_field
 
 def server(target: str, label: str, frame: bytes) -> None:
     """Powiadomienie/odpowiedz wyslana przez serwer (ramka z naglowkiem 16 B)."""
+    always = len(frame) >= 8 and int.from_bytes(frame[6:8], "big") in ALWAYS_COMPONENTS
     with _LOCK:
-        if time.monotonic() > _UNTIL:
+        if time.monotonic() > _UNTIL and not (always and _T0):
             return
         try:
             body = tdf.pretty(tdf.decode(frame[16:]))
@@ -85,7 +89,7 @@ def client(who: str, component: int, command: int, msg_num: int, msg_type: int, 
     if msg_type == 4:
         return
     with _LOCK:
-        if time.monotonic() > _UNTIL:
+        if time.monotonic() > _UNTIL and not (component in ALWAYS_COMPONENTS and _T0):
             return
         key = (who, component, command)
         _SEEN[key] = _SEEN.get(key, 0) + 1

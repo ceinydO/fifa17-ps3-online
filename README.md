@@ -73,6 +73,110 @@ tylko wartosci < 2^31.
 powiadomienie GameManager rozkodowane, kazde zadanie klientow z czasem w ms, wynik), sondy po 3/6/9 s gdy host milczy
 (`gm_probes`), flush przechwytow co 2 s, `collect_logs.ps1` pakuje to wszystko do jednego zip-a. Selftest 43/43.
 
+**Test 2026-10-11 (dwa przebiegi z drabinka; logi serwera + RPCS3 hosta `odyniec` i kolegi `odyniec1`):**
+- **Poziom 1 (bajt w bajt jak stary) doszedl do konca na OBU klientach**: i host, i kolega (`odyniec1`) wyslali
+  `updateMeshConnection` (STAT=2) oraz `finalizeGameCreation` w ciagu 0,2 s od setupu; oba zbindowaly UDP 3659/9999.
+  Potem host: lookup `odyniec1` + statystyki `MyFriendlies` (`EID=[0]`), i ~13,9 s po setupie `sceNpBasicSetPresence`
+  (64 B) -- kolega dostaje wtedy `basic_event: event:1 (PRESENCE)`. Zadnego `sceNpBasicSendMessageGui`
+  (zaproszenia) w zadnym z ~40 zebranych logow RPCS3.
+- **Drugi `createGame` (poziom 2) wywalil emulator hosta w OBU przebiegach** (takze po dodaniu usuwania starej gry):
+  `·F ... VM: Access violation reading location 0x0`, `FEThread`, PC `0x288ae0`, `Emulation has been frozen!`.
+  Pierwsza hipoteza (stara gra GID=1 zostala w kliencie) byla BLEDNA: `NotifyGameRemoved` przed setupem nic nie
+  zmienilo. Prawdziwa przyczyna to poziom 2: **klient nie uznal nikogo za hosta**.
+- **Jak klient rozpoznaje hosta (dekompilacja, `Game` ctor `0xc58c3c`, `addPlayer 0xc5844c`, `0xc6a4e0`):**
+  `isHost` (`Game::vt[0x64]`, `0xc57318`) = `Game+0x3ac == Game+0x42c`, tzn. punkt koncowy sieci hosta == MOJ punkt
+  koncowy. Punkty koncowe leza w mapie `mGameEndpointMap` kluczowanej CONG (`Game::vt[0x88] = 0xc573a8`).
+  * `Game+0x42c` (moj) = punkt koncowy mojego gracza z rostera (klucz = jego CONG) lub, w stanie INITIALIZING,
+    punkt koncowy zbudowany z THST {CONG, CSID, HNET}, gdy moj BlazeId == THST.HPID.
+  * `Game+0x3ac` (host): w stanie INITIALIZING/0x84/0x85 = ten punkt z THST; w innym stanie (np. PRE_GAME) =
+    punkt koncowy o kluczu **DHST.CONG** (pole `dedicatedServerHostInfo`; nieobecne => klucz 0).
+  * Uklad `GAME`: trzy kolejne `HostInfo` (rozmiar 0x38; w nim +0x10 HPID, +0x20 HSLT, +0x28 CONG, +0x30 CSID) pod
+    `GAME+0xe0` = THST, `+0x118` = DHST, `+0x150` = PHST.
+  * Stary przebieg: nikt nie mial CONG (wszyscy klucz 0), wiec punkt koncowy 0 byl jednoczesnie "hostem" i "moim" u
+    KAZDEGO -- kolega tez uwazal sie za hosta i tez wysylal `finalizeGameCreation` (stad nic z zaproszenia).
+  * Poziom 2 nadal nie mial CONG w THST/DHST, ale roster mial niezerowe CONG => `isHost=false` u wszystkich =>
+    brak `updateMeshConnection`/`finalizeGameCreation`; `0xc6a4e0` konczy zadanie createGame od razu (callback
+    `0x2dee08`), a konstruktor sesji (`0x2891e4`) wywoluje `onPlayerAdded` dla lokalnego gracza w stanie 4 i
+    `0x2887d4` ("biezaca gra" z `gses`/`gsmp`) zwraca NULL => crash. Przy STAT=2 w setupie to wywolanie nie
+    nastepuje (dlatego dolaczajacy powinien miec STAT=2).
+  * Przebudowany przebieg 504829f (INITIALIZING, CONG spojne) nie crashowal, tylko stal 30 s (zadanie createGame
+    bez konca; porownaj 13,9 s w poziomie 1) -- przyczyna wciaz nieustalona (nie wiemy, czy siec "created" doszla).
+- **Zaproszenie**: PS3 uzywa sciezki NP (`UNK_025fbcd0 == 0` -> operacja `SendGameInvite` -> `sceNpBasicSendMessageGui`,
+  `0x301ad4`/`0x302454`), uruchamianej przez UI (skrypt Flash) po `EVENT_CREATEGAME_SUCCESS`
+  (`0x1624e1c`) -- host nigdy do niej nie doszedl. W starym przebiegu kolega byl od razu w setupie jako CONNECTED
+  i mial wlasna gre, co mogło wyłączyć krok zaproszenia.
+**Nowa drabinka (poziomy "host sam"; niezweryfikowana na zywo), `gamemgr.LEVELS`:** setup dostaje TYLKO host, kolega
+wchodzi dopiero po zaproszeniu przez `joinGame` (dostaje wtedy `NotifyGameSetup` z CONG i STAT=2, host zmiane
+stanu/`NotifyPlayerJoining`):
+1. `1-host-sam-stary` -- PRE_GAME, host bez CONG (klucz 0 = host, jak dzialalo), stare pola, REAS jak FIFA 14;
+2. `2-host-i-zarezerwowany-kolega` -- jak 1 + kolega z `PLJD` w rosterze hosta jako ZAREZERWOWANY (STAT=0, z CONG);
+3. `3-host-sam-initializing` -- INITIALIZING + spojny CONG hosta (roster = THST = PHST), po finalize PRE_GAME;
+4. `4-host-laczy-sie` -- jak 3 + host w setupie STAT=2, po finalize serwer oglasza go jako CONNECTED;
+5. `5-docelowy` -- jak 4 + zarezerwowany kolega + nowe pola graczy i gry + REAS DLSC/CREATE.
+Auto: start od 1; po `finalizeGameCreation` hosta kolejny `createGame` bierze nastepny poziom; po pierwszej porazce raz
+cel (5), potem najlepszy dzialajacy; rozlaczenie klienta w trakcie proby (crash) nie liczy sie jako porazka, powtarza
+poziom (2 razy). Przed nowa gra serwer usuwa stare gry hosta (`NotifyGameRemoved`). Plik stanu ma wersje 3.
+`gm_attempts.log` loguje juz bez limitu czasu kazde zadanie GameManager i Messaging (joinGame kolegi po zaakceptowaniu
+zaproszenia moze przyjsc minute po createGame). Selftest 56/56.
+
+## Latest session: 2026-10-09 wieczor (pierwszy test na zywo po przebudowie GameManager)
+
+**Wynik testu (host `odyniec` + kolega `odyniec1`, Radmin, logi serwera i obu RPCS3):**
+- Logowanie, lookup persony, `listEntitlements`, `Messaging::fetchMessages/getMessages` i Stats dzialaja u obu.
+- Host wyslal `createGame` (PLJD: wlasny CGID `(30722,2,uid)` odeslany poprawnie, zarezerwowany kolega z
+  unikalnym uid) -> serwer odpowiedzial `CreateGameResponse GID=1` + `NotifyGameSetup` (DLSC/CREATE, GSTA=1,
+  host STAT=2). Klient hosta po tym zbindowal UDP **3659 i 9999** (czyli zaczal tworzyc siec gry), ale
+  **NIE wyslal ani `updateMeshConnection`, ani `finalizeGameCreation`** i nie wywolal `sceNpBasicSendMessageGui`;
+  po ok. minucie uzytkownik zamknal emulator. Kolega nie dostal nic (zaproszony dolacza dopiero po finalize).
+- **To jest REGRESJA wzgledem ostatniego testu na zywo (commit 2c9842c):** tam ten sam lancuch dochodzil do
+  `finalizeGameCreation`. Stary setup mial GSTA=130 (PRE_GAME), obu graczy z STAT=4, REAS nieustawiona (zly tag
+  VALU = unia pusta) oraz osobne `GamePlayerStateChange` x2 + `GameStateChange`. Nowy ma GSTA=1, tylko hosta ze
+  STAT=2, REAS=DLSC i brak follow-upow.
+
+**Co ustalila dekompilacja w tej sesji (adresy w EBOOT FIFA 17 PS3):**
+- `0xc6e0b8` = handler NotifyGameSetup: znajduje zadanie createGame po (indeks uzytkownika, GID), tworzy `Game`
+  (`0xc69ed0` -> ctor `0xc58c3c`), potem `0xc6dad8` -> `0xc60028` odpala tworzenie sieci gry. Wynik sieci wraca do
+  `0xc6a92c` (onNetworkCreated) -> `0xc6a4e0`, ktore dla hosta wysyla `finalizeGameCreation` (`0xc6a204`), a dla
+  dolaczajacego `updateMeshConnection STAT=2` (`0xc59f14`). `updateMeshConnection` hosta nie wysyla.
+- Odpowiedz na finalize (`0xc6bf74`) konczy zadanie createGame sukcesem, gdy `0xc5b8c0` zwroci prawde
+  (dla REAS nieustawionej i DLSC z DCTX!=3 -- tak). Dopiero wtedy FE moze wyslac zaproszenie.
+- Wysylka zaproszenia (`0x302454`) wymaga biezacej sesji w komponencie `gses`; bez niej zwraca blad bez wywolania
+  `sceNpBasicSendMessageGui`. Kod FIFA ustawia id gry dla hosta w obsludze stanu INITIALIZING, wiec sam stary
+  przebieg (od razu PRE_GAME) mogl dojsc do konca createGame, ale nie do zaproszenia.
+- `isHost` w `Game` = (BlazeId z THST/PHST.HPID == BlazeId zalogowanego uzytkownika z listy lokalnych graczy);
+  `vtable[0x28]` gry zwraca id hosta topologii (`Game+0x1b8`), a handler NotifyGameSetup wraca bez dzialania, gdy to 0.
+- Obserwacja: naglowek `Easw-Session-Data-Nucleus-Id` (POW, `0x51c1e4`) mial u hosta id KOLEGI (2028699422), u kolegi
+  jego wlasne. FIFA pobiera je z innego kontenera uzytkownikow niz lista graczy lokalnych (hipoteza: pierwszy/min id).
+  Nie wplywa na GameManager (tam porownanie idzie po liscie lokalnych), ale warto pamietac przy FUT/POW.
+
+**Test 2026-10-10 (logi RPCS3 hosta i kolegi, bez logu serwera):** nadal brak polaczenia. W logu hosta jest jedna
+para `bind` UDP 3659/9999 (jedno `createGame`), potem nic -- zadnego `sceNpBasicSendMessageGui`; u kolegi nie bylo
+bindu 9999, wiec nie dostal zadnego setupu (zaproszony dostaje setup dopiero po `finalizeGameCreation` hosta).
+`NPHandler: basic_event: event:0` to u RPCS3 OFFLINE znajomego (1 = presence, 5 = zaproszenie), nie wiadomosc.
+Logi RPCS3 hosta ze starego (2026-10-08) i nowego przebiegu sa prawie identyczne -- rozstrzyga tylko log serwera.
+**Z archiwalnego logu serwera (stary przebieg, 2026-10-08 22:02 UTC):** po setupie host wysylal OD RAZU
+`updateMeshConnection` (STAT=2, TCG=(30722,2,0)) i `finalizeGameCreation`, potem FE robil lookup kolegi i statystyki
+`MyFriendlies` i wracal do poprzedniego ekranu bez zaproszenia (czyli createGame konczyl sie sukcesem).
+
+**Zmiana w serwerze (niezweryfikowana na zywo): drabinka poziomow pierwszego `NotifyGameSetup`** (`gamemgr.LEVELS`,
+`gm_variant`, domyslnie 0 = auto):
+1. `1-stary-ksztalt` -- BAJT W BAJT jak stary przebieg (zweryfikowane diffem po zamaskowaniu id): PRE_GAME, obaj gracze
+   od razu w setupie (STAT=4), stare pola graczy i gry, REAS z tagiem VALU (unia pusta), follow-upy 0x74 x2 + 0x64;
+2. `+nowi-gracze` -- nowe pola rostera (CONG, CSID, DSUI, EXBL, LOC, NASP, PATT, TIME, UUID) i NotifyUserAdded;
+3. `+nowa-gra` -- GPVH, SEED, UUID, MNCP, PSAS, pelny HostInfo, MACI w adresach;
+4. `+nowy-REAS` -- host DLSC/CREATE, zaproszony IJGS;
+5. `+zaproszony-po-finalize` -- host sam w pierwszym setupie;
+6. `6-initializing` -- INITIALIZING + brak follow-upow (docelowy; tylko on daje 'gses' potrzebne do zaproszenia).
+Tryb auto: poziom 1 na start; kazdy `createGame`, ktory doszedl do `finalizeGameCreation` hosta, zwieksza poziom przy
+nastepnej probie; porazka (watchdog 14 s) cofa do najnowszego dzialajacego i usuwa gre (`NotifyGameRemoved`,
+`gm_watchdog_remove`), zeby host mogl ponowic bez restartu. Stan: `state/gm_variant.json`. W logu serwera:
+`POZIOM n`, `WATCHDOG ...`, `SUKCES poziomu n`. Dodatkowo identyfikatory graczy sa teraz < 2^31
+(`ids.uid_for`: 1.1e9..2.0e9) -- host `odyniec` mial wczesniej uid 2 999 187 369, a stary dzialajacy przebieg uzywal
+tylko wartosci < 2^31.
+**Diagnostyka pod jeden test:** `logs/session_*.log` (caly log konsoli), `logs/gm_attempts.log` (dziennik prob: kazde
+powiadomienie GameManager rozkodowane, kazde zadanie klientow z czasem w ms, wynik), sondy po 3/6/9 s gdy host milczy
+(`gm_probes`), flush przechwytow co 2 s, `collect_logs.ps1` pakuje to wszystko do jednego zip-a. Selftest 43/43.
+
 **Test 2026-10-11 (pierwszy z drabinka; logi serwera + RPCS3 hosta `odyniec` i kolegi `odyniec1`):**
 - **Poziom 1 (bajt w bajt jak stary) doszedl do konca na OBU klientach**: i host, i kolega (`odyniec1`) wyslali
   `updateMeshConnection` (STAT=2) oraz `finalizeGameCreation` w ciagu 0,2 s od setupu; oba zbindowaly UDP 3659/9999.

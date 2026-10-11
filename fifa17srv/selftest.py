@@ -51,9 +51,17 @@ def _client_ctx(ca: Path, legacy: bool = False) -> ssl.SSLContext:
 
 def _gamemgr_checks() -> None:
     """GameManager: przebieg create -> mesh -> finalize -> dolaczenie na syntetycznych graczach (bez gniazd)."""
-    from . import gamemgr, ids
+    from . import gamemgr, ids, gmtrace
 
-    cfg = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmstate_"), gm_variant=6)   # docelowy ksztalt
+    def T(raw):                                   # {tag: wartosc} z ramki (naglowek 16 B)
+        return dict((t.rstrip(), v) for t, _t, v in tdf.decode(raw[16:]))
+
+    def sub(fields):
+        return dict((t.rstrip(), v) for t, _t, v in fields)
+
+    def setups(outs, who):
+        return [o for o in outs if o[0] == who and o[2][8:10] == (0x14).to_bytes(2, "big")]
+
     gamemgr.reset()
     reg = {
         "host": {"identity": ("host", 1, b"h" * 36), "ip": 1, "port": 3659, "peer_ip": 0x0A000001, "maci": 5},
@@ -63,120 +71,176 @@ def _gamemgr_checks() -> None:
     req = [("CMGD", tdf.STRUCT, [("GVER", tdf.STRING, "qa-only")]),
            ("GMCD", tdf.STRUCT, [("NTOP", tdf.VARINT, 130), ("PMAX", tdf.VARINT, 2), ("GSET", tdf.VARINT, 1060)]),
            ("GTYP", tdf.STRING, "gameType20")]
-    gid, _reply, outs = gamemgr.create_game(cfg, "host", req, ["guest"], lookup)
-    check("GameManager: host dostaje tylko wlasne NotifyGameSetup", [o[0] for o in outs] == ["host"])
-    setup = tdf.decode(outs[0][2][16:])
-    reas = dict((t, v) for t, _t, v in setup)["REAS"]
-    check("GameManager: REAS = unia DLSC (numer 0, tag DLSC) z DCTX=0", reas[0] == 0 and reas[1][0] == "DLSC"
-          and reas[1][2] == [("DCTX", tdf.VARINT, 0)], str(reas))
-    roster = dict((t, v) for t, _t, v in setup)["PROS"][1]
-    cong = dict((t, v) for t, _t, v in roster[0])["CONG"]
-    check("GameManager: roster ma niezerowe, unikalne CONG", cong == ids.connection_group_id_for("host") != 0)
-    fin = gamemgr.finalize_game(cfg, "host", [("GID ", tdf.VARINT, gid)], lookup)
-    guest_setup = [o for o in fin if o[0] == "guest" and o[2][8:10] == (0x14).to_bytes(2, "big")]
-    check("GameManager: po finalizeGameCreation zaproszony dostaje NotifyGameSetup", len(guest_setup) == 1)
-    g = tdf.decode(guest_setup[0][2][16:])
-    greas = dict((t, v) for t, _t, v in g)["REAS"]
-    check("GameManager: zaproszony: REAS = IJGS (numer 1)", greas[0] == 1 and greas[1][0] == "IJGS", str(greas))
-    groster = dict((t, v) for t, _t, v in g)["PROS"][1]
-    congs = {dict((t, v) for t, _t, v in r)["NAME"]: dict((t, v) for t, _t, v in r)["CONG"] for r in groster}
-    check("GameManager: obaj gracze maja rozne CONG", len(set(congs.values())) == 2 and 0 not in congs.values())
+    hcong = ids.connection_group_id_for("host")
+    gcong = ids.connection_group_id_for("guest")
+
+    # --- poziom 1 (host sam, stary ksztalt): setup tylko dla hosta, host bez CONG; kolega dolacza przez joinGame
+    cfg1 = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gm1_"), gm_variant=1)
+    gid, _r, outs = gamemgr.create_game(cfg1, "host", req, ["guest"], lookup)
+    check("poziom 1: setup dostaje tylko host", {o[0] for o in outs} == {"host"} and len(setups(outs, "host")) == 1)
+    st = T(setups(outs, "host")[0][2])
+    game1, pros1 = sub(st["GAME"]), st["PROS"][1]
+    p0 = sub(pros1[0])
+    check("poziom 1: PRE_GAME, w rosterze tylko host (STAT=4) bez CONG, REAS jak FIFA 14 (VALU)",
+          game1["GSTA"] == gamemgr.STATE_PRE_GAME and len(pros1) == 1 and p0["STAT"] == 4 and "CONG" not in p0
+          and st["REAS"][0] == 0 and st["REAS"][1][0] == "VALU")
+    check("poziom 1: THST/PHST bez CONG (stary ksztalt)", "CONG" not in sub(game1["THST"])
+          and "CONG" not in sub(game1["PHST"]) and sub(game1["THST"])["HPID"] == ids.uid_for("host"))
+    check("poziom 1: follow-upy dla hosta (stan gracza + stan gry)",
+          sum(1 for o in outs if o[1].startswith("NotifyGamePlayerStateChange")) == 1
+          and sum(1 for o in outs if o[1].startswith("NotifyGameStateChange")) == 1)
+    fin = gamemgr.finalize_game(cfg1, "host", [("GID ", tdf.VARINT, gid)], lookup)
+    check("poziom 1: finalizeGameCreation nie dosyla kolegi do gry sam z siebie",
+          not setups(fin, "guest") and gamemgr.attempt_info(gid)[2] is True)
+    jr, jouts = gamemgr.join_game(cfg1, "guest", [("GID ", tdf.VARINT, gid)], lookup)
+    gs = setups(jouts, "guest")
+    check("joinGame kolegi: dostaje NotifyGameSetup, a host NotifyPlayerJoining", len(gs) == 1
+          and any(o[0] == "host" and o[1] == "NotifyPlayerJoining" for o in jouts))
+    gst = T(gs[0][2])
+    gp = [sub(x) for x in gst["PROS"][1]]
+    check("dolaczajacy: roster = host bez CONG + kolega z CONG (rozne klucze punktow koncowych), kolega w CONNECTING",
+          len(gp) == 2 and "CONG" not in gp[0] and gp[1]["CONG"] == gcong and gp[1]["STAT"] == 2
+          and gst["REAS"][1][0] == "DLSC" and gst["REAS"][1][2] == [("DCTX", tdf.VARINT, 1)])
     mesh = gamemgr.update_mesh_connection(
-        cfg, "guest", [("GID ", tdf.VARINT, gid), ("STAT", tdf.VARINT, 2),
-                       ("TCG ", tdf.OBJID, ids.connection_group_objid_for("host"))], lookup)
-    done = [o for o in mesh if o[1].startswith("NotifyPlayerJoinCompleted guest")]
-    check("GameManager: mesh guest->host konczy dolaczanie gracza", len(done) >= 1)
+        cfg1, "guest", [("GID ", tdf.VARINT, gid), ("STAT", tdf.VARINT, 2),
+                        ("TCG ", tdf.OBJID, ids.connection_group_objid_for("host"))], lookup)
+    check("mesh kolegi konczy dolaczanie gracza", any(o[1].startswith("NotifyPlayerJoinCompleted guest") for o in mesh))
 
-    # --- drabinka poziomow pierwszego setupu (auto: start od 1, wyzej po sukcesie, po porazce wraca)
-    def setup_of(created, who="host"):
-        gid_, _r, outs_ = created
-        raw = [o for o in outs_ if o[0] == who and o[2][8:10] == (0x14).to_bytes(2, "big")][0][2]
-        d_ = dict((t, v) for t, _t, v in tdf.decode(raw[16:]))
-        game_ = dict((t, v) for t, _t, v in d_["GAME"])
-        stats_ = [dict((t, v) for t, _t, v in r)["STAT"] for r in d_["PROS"][1]]
-        return gid_, outs_, game_["GSTA"], stats_, d_["REAS"]
-
+    # --- poziom 2: host + zarezerwowany kolega (STAT=0) z PLJD; kolega nie dostaje nic do joinGame
     gamemgr.reset()
-    cfg2 = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmstate_"))
-    g1, o1, gsta1, st1, reas1 = setup_of(gamemgr.create_game(cfg2, "host", req, ["guest"], lookup))
-    check("poziom 1 (auto, start): PRE_GAME, obaj gracze CONNECTED w setupie, REAS jak FIFA 14 (tag VALU)",
-          gsta1 == gamemgr.STATE_PRE_GAME and st1 == [4, 4] and reas1[0] == 0 and reas1[1][0] == "VALU"
-          and {o[0] for o in o1} == {"host", "guest"} and gamemgr.attempt_info(g1)[:2] == (1, "1-stary-ksztalt"))
-    host_players = dict((t, v) for t, _t, v in tdf.decode(
-        [o for o in o1 if o[0] == "host" and o[2][8:10] == (0x14).to_bytes(2, "big")][0][2][16:]))["PROS"][1]
-    check("poziom 1: roster w starym ksztalcie (bez CONG/TIME/UUID)",
-          "CONG" not in dict((t, v) for t, _t, v in host_players[0]) and "TIME" not in dict((t, v) for t, _t, v in host_players[0]))
-    check("poziom 1: follow-upy GamePlayerStateChange x2 + GameStateChange dla kazdego gracza",
-          sum(1 for o in o1 if o[1].startswith("NotifyGamePlayerStateChange")) == 4
-          and sum(1 for o in o1 if o[1].startswith("NotifyGameStateChange")) == 2)
-    # brak finalize -> porazka, zaden poziom nie dziala -> kolejny wyzszy
-    g2, o2, gsta2, st2, reas2 = setup_of(gamemgr.create_game(cfg2, "host", req, ["guest"], lookup))
-    check("po porazce poziomu 1 (zaden nie dzialal) auto probuje poziom 2", gamemgr.attempt_info(g2)[0] == 2)
-    gamemgr.finalize_game(cfg2, "host", [("GID ", tdf.VARINT, g2)], lookup)
-    g3, *_ = setup_of(gamemgr.create_game(cfg2, "host", req, ["guest"], lookup))
-    check("po sukcesie poziomu 2 auto probuje poziom 3", gamemgr.attempt_info(g3)[0] == 3)
-    wd = gamemgr.watchdog_expired(cfg2, g3)
+    cfgR = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmR_"), gm_variant=2)
+    req_r = req + [("PLJD", tdf.STRUCT, [("BTPL", tdf.OBJID, (30722, 2, 1)), ("DFRL", tdf.STRING, ""),
+                   ("GENT", tdf.VARINT, 0),
+                   ("PLDL", tdf.LIST, (tdf.STRUCT, [[("IREP", tdf.VARINT, 0), ("RLNM", tdf.STRING, ""),
+                                                     ("USID", tdf.STRUCT, [("NAME", tdf.STRING, "guest")])]])),
+                   ("SLOT", tdf.VARINT, 1)])]
+    gidR, _r, outsR = gamemgr.create_game(cfgR, "host", tdf.decode(tdf.encode(req_r)), ["guest", "zbednik"], lookup)
+    stR = T(setups(outsR, "host")[0][2])
+    prR = [sub(x) for x in stR["PROS"][1]]
+    check("poziom 2: w rosterze hosta jest zarezerwowany kolega (STAT=0, z CONG), nikt inny, kolega bez setupu",
+          len(prR) == 2 and prR[0]["STAT"] == 4 and prR[1]["STAT"] == 0 and prR[1]["NAME"] == "guest"
+          and prR[1]["CONG"] == gcong and "CONG" not in prR[0] and not setups(outsR, "guest")
+          and {o[0] for o in outsR} == {"host"})
+    jrR, joR = gamemgr.join_game(cfgR, "guest", [("GID ", tdf.VARINT, gidR)], lookup)
+    check("poziom 2: joinGame zarezerwowanego -> host dostaje zmiane stanu kolegi (nie PlayerJoining), kolega setup",
+          len(setups(joR, "guest")) == 1
+          and any(o[0] == "host" and o[1].startswith("NotifyGamePlayerStateChange guest=2") for o in joR)
+          and not any(o[1] == "NotifyPlayerJoining" for o in joR))
+
+    # --- poziom 3: INITIALIZING + spojny CONG hosta (roster == THST == PHST), bez follow-upow
+    gamemgr.reset()
+    cfg2 = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gm2_"), gm_variant=3)
+    gid2, _r, outs2 = gamemgr.create_game(cfg2, "host", req, ["guest"], lookup)
+    st2 = T(setups(outs2, "host")[0][2])
+    g2, p2 = sub(st2["GAME"]), sub(st2["PROS"][1][0])
+    check("poziom 3: INITIALIZING, CONG hosta jednakowy w rosterze, THST i PHST (= klucz punktu koncowego hosta)",
+          g2["GSTA"] == gamemgr.STATE_INITIALIZING and p2["CONG"] == hcong == sub(g2["THST"])["CONG"]
+          == sub(g2["PHST"])["CONG"] and sub(g2["THST"])["HPID"] == ids.uid_for("host") and p2["STAT"] == 4)
+    check("poziom 3: bez follow-upow", [o[1] for o in outs2 if not o[1].startswith("NotifyGameSetup")] == [])
+    fin2 = gamemgr.finalize_game(cfg2, "host", [("GID ", tdf.VARINT, gid2)], lookup)
+    check("poziom 3: po finalize gra przechodzi INITIALIZING -> PRE_GAME",
+          any(o[1] == "NotifyGameStateChange PRE_GAME" for o in fin2))
+
+    # --- poziom 4: host w setupie CONNECTING, po finalize serwer oglasza go jako CONNECTED
+    gamemgr.reset()
+    cfg3 = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gm3_"), gm_variant=4)
+    gid3, _r, outs3 = gamemgr.create_game(cfg3, "host", req, ["guest"], lookup)
+    check("poziom 4: host w setupie ma STAT=2", sub(T(setups(outs3, "host")[0][2])["PROS"][1][0])["STAT"] == 2)
+    fin3 = gamemgr.finalize_game(cfg3, "host", [("GID ", tdf.VARINT, gid3)], lookup)
+    check("poziom 4: finalize oglasza hosta jako CONNECTED i JoinCompleted",
+          any(o[1].startswith("NotifyGamePlayerStateChange CONNECTED host") for o in fin3)
+          and any(o[1].startswith("NotifyPlayerJoinCompleted host") for o in fin3))
+
+    # --- poziom 5 (docelowy): nowe pola, REAS DLSC/CREATE dla hosta
+    gamemgr.reset()
+    cfg4 = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gm4_"), gm_variant=5)
+    gid4, _r, outs4 = gamemgr.create_game(cfg4, "host", req, ["guest"], lookup)
+    st4 = T(setups(outs4, "host")[0][2])
+    p4 = sub(st4["PROS"][1][0])
+    check("poziom 5: REAS = DLSC{DCTX=0}, roster z nowymi polami (CONG, TIME, UUID...)",
+          st4["REAS"][0] == 0 and st4["REAS"][1][0] == "DLSC" and st4["REAS"][1][2] == [("DCTX", tdf.VARINT, 0)]
+          and {"CONG", "TIME", "UUID", "LOC", "NASP"} <= set(p4) and p4["CONG"] == hcong)
+    j4 = gamemgr.finalize_game(cfg4, "host", [("GID ", tdf.VARINT, gid4)], lookup)
+    jr4, jo4 = gamemgr.join_game(cfg4, "guest", [("GID ", tdf.VARINT, gid4)], lookup)
+    gs4 = T(setups(jo4, "guest")[0][2])
+    check("poziom 5: dolaczajacy dostaje DLSC/JOIN i unikalny CONG",
+          gs4["REAS"][1][0] == "DLSC" and sub(gs4["PROS"][1][1])["CONG"] == gcong != hcong)
+
+    # --- drabinka (auto): start od 1; po sukcesie wyzej; po pierwszej porazce raz cel; potem najlepszy dzialajacy
+    gamemgr.reset()
+    cfgA = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmauto_"))
+    a1, *_ = gamemgr.create_game(cfgA, "host", req, ["guest"], lookup)
+    check("auto: pierwsza proba = poziom 1", gamemgr.attempt_info(a1)[:2] == (1, "1-host-sam-stary"))
+    gamemgr.finalize_game(cfgA, "host", [("GID ", tdf.VARINT, a1)], lookup)
+    a2, *_ = gamemgr.create_game(cfgA, "host", req, ["guest"], lookup)
+    check("auto: po sukcesie poziomu 1 -> poziom 2", gamemgr.attempt_info(a2)[0] == 2)
+    wd = gamemgr.watchdog_expired(cfgA, a2)
     check("watchdog: brak finalize usuwa gre i wysyla NotifyGameRemoved do graczy",
-          {o[0] for o in wd} == {"host", "guest"} and gamemgr.attempt_info(g3) is None)
-    g4a, *_ = setup_of(gamemgr.create_game(cfg2, "host", req, ["guest"], lookup))
-    check("po pierwszej porazce (poziom 3) auto sprawdza raz od razu docelowy poziom 6",
-          gamemgr.attempt_info(g4a)[0] == 6)
-    gamemgr.watchdog_expired(cfg2, g4a)
-    g4, *_ = setup_of(gamemgr.create_game(cfg2, "host", req, ["guest"], lookup))
-    check("po porazce poziomu 6 auto wraca do najnowszego dzialajacego (2)", gamemgr.attempt_info(g4)[0] == 2)
-    # sondy + dziennik prob
-    from . import gmtrace
+          {o[0] for o in wd} == {"host"} and gamemgr.attempt_info(a2) is None)
+    a3, *_ = gamemgr.create_game(cfgA, "host", req, ["guest"], lookup)
+    check("auto: po pierwszej porazce (poziom 2) sprawdza raz od razu docelowy poziom 5",
+          gamemgr.attempt_info(a3)[0] == gamemgr.MAX_LEVEL == 5)
+    gamemgr.watchdog_expired(cfgA, a3)
+    a4, *_ = gamemgr.create_game(cfgA, "host", req, ["guest"], lookup)
+    check("auto: po porazce celu wraca do najnowszego dzialajacego (1)", gamemgr.attempt_info(a4)[0] == 1)
+
+    # --- sondy + dziennik prob
     trace_path = Path(tempfile.mkdtemp(prefix="fifa17srv_gmtrace_")) / "gm_attempts.log"
     gmtrace.configure(trace_path)
-    gmtrace.begin("host", g4, 2, "test", "powod", "opis", req)
-    pr = [gamemgr.probe_frames(cfg2, g4, n, lookup) for n in (1, 2, 3)]
+    gmtrace.begin("host", a4, 1, "test", "powod", "opis", req)
+    pr = [gamemgr.probe_frames(cfgA, a4, n, lookup) for n in (1, 2, 3)]
     check("sondy 1-3 daja powiadomienia dla hosta (PlatformHostInitialized; stan+JoinCompleted; GameStateChange)",
           [len(x) for x in pr] == [1, 2, 1] and all(o[0] == "host" for x in pr for o in x))
     gmtrace.server("host", pr[0][0][1], pr[0][0][2])
-    gmtrace.client("host", 4, 0x1D, 7, 0, [("GID ", tdf.VARINT, g4)])
-    gmtrace.outcome(g4, "test")
+    gmtrace.client("host", 4, 0x1D, 7, 0, [("GID ", tdf.VARINT, a4)])
+    gmtrace.outcome(a4, "test")
     text = trace_path.read_text(encoding="utf-8")
     check("dziennik prob zawiera rozkodowane powiadomienie, zadanie klienta i zestawienie",
           "SONDA 1" in text and "komp=0x0004 cmd=0x001D" in text and "0x0004/0x001D x1" in text, text[-300:])
-    gamemgr.update_mesh_connection(cfg2, "host", [("GID ", tdf.VARINT, g4), ("STAT", tdf.VARINT, 2)], lookup)
-    check("po updateMeshConnection hosta sondy sie wylaczaja", gamemgr.host_reacted(g4)
-          and gamemgr.probe_frames(cfg2, g4, 1, lookup) == [])
-    cfg3 = Config(state_dir=cfg2.state_dir, gm_variant=6)
-    g6, o6, gsta6, st6, reas6 = setup_of(gamemgr.create_game(cfg3, "host", req, ["guest"], lookup))
-    # stara gra (g4, host + zaproszony) znika osobnym NotifyGameRemoved PRZED setupem nowej -- inaczej klient rozbiera
-    # ja w trakcie tworzenia nowej i pada (test na zywo 2026-10-11, crash 0x288ae0)
-    removed = [o for o in o6 if o[1].startswith("NotifyGameRemoved")]
-    first_setup = next(i for i, o in enumerate(o6) if o[1].startswith("NotifyGameSetup"))
+    gmtrace._UNTIL = 0.0                                     # okno 45 s minelo
+    gmtrace.client("guest", 4, 0x09, 8, 0, [("GID ", tdf.VARINT, a4)])
+    gmtrace.client("guest", 0x7802, 0x32, 9, 0, [])
+    text = trace_path.read_text(encoding="utf-8")
+    check("po oknie 45 s nadal logowany jest joinGame (GameManager), a inne zadania nie",
+          "komp=0x0004 cmd=0x0009" in text and "komp=0x7802 cmd=0x0032" not in text)
+    gamemgr.update_mesh_connection(cfgA, "host", [("GID ", tdf.VARINT, a4), ("STAT", tdf.VARINT, 2)], lookup)
+    check("po updateMeshConnection hosta sondy sie wylaczaja", gamemgr.host_reacted(a4)
+          and gamemgr.probe_frames(cfgA, a4, 1, lookup) == [])
+    gamemgr.reset()
+
+    # --- nowy createGame usuwa stara gre hosta (NotifyGameRemoved przed nowym setupem)
+    cfgS = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmstale_"), gm_variant=1)
+    s1, *_ = gamemgr.create_game(cfgS, "host", req, ["guest"], lookup)
+    gamemgr.join_game(cfgS, "guest", [("GID ", tdf.VARINT, s1)], lookup)
+    s2, _r, os2 = gamemgr.create_game(cfgS, "host", req, ["guest"], lookup)
+    removed = [o for o in os2 if o[1].startswith("NotifyGameRemoved")]
+    first_setup = next(i for i, o in enumerate(os2) if o[1].startswith("NotifyGameSetup"))
     check("nowy createGame usuwa stara gre hosta: NotifyGameRemoved dla kazdego czlonka, przed setupem nowej",
-          {o[0] for o in removed} == {"host", "guest"} and all(o[2][8:10] == (0x10).to_bytes(2, "big") for o in removed)
-          and all(i < first_setup for i, o in enumerate(o6) if o[1].startswith("NotifyGameRemoved"))
-          and gamemgr.attempt_info(g4) is None and gamemgr.attempt_info(g6) is not None)
-    check("gm_variant=6 wymusza docelowy ksztalt: INITIALIZING, host sam, REAS DLSC",
-          gsta6 == gamemgr.STATE_INITIALIZING and st6 == [4] and reas6[1][0] == "DLSC"
-          and {o[0] for o in o6 if not o[1].startswith("NotifyGameRemoved")} == {"host"})
+          {o[0] for o in removed} == {"host", "guest"}
+          and all(i < first_setup for i, o in enumerate(os2) if o[1].startswith("NotifyGameRemoved"))
+          and gamemgr.attempt_info(s1) is None and gamemgr.attempt_info(s2) is not None)
     gamemgr.reset()
 
     # --- rozlaczenie klienta hosta w trakcie proby (crash/zamkniecie) NIE jest porazka ksztaltu: ten sam poziom wraca
-    cfg4 = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmcrash_"))
-    c1, *_ = setup_of(gamemgr.create_game(cfg4, "host", req, ["guest"], lookup))
-    gamemgr.finalize_game(cfg4, "host", [("GID ", tdf.VARINT, c1)], lookup)         # poziom 1 OK
-    c2, *_ = setup_of(gamemgr.create_game(cfg4, "host", req, ["guest"], lookup))     # poziom 2
+    cfgC = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmcrash_"))
+    c1, *_ = gamemgr.create_game(cfgC, "host", req, ["guest"], lookup)
+    gamemgr.finalize_game(cfgC, "host", [("GID ", tdf.VARINT, c1)], lookup)         # poziom 1 OK
+    c2, *_ = gamemgr.create_game(cfgC, "host", req, ["guest"], lookup)               # poziom 2
     check("po sukcesie poziomu 1 jest poziom 2", gamemgr.attempt_info(c2)[0] == 2)
-    gamemgr.watchdog_expired(cfg4, c2)                                               # 14 s ciszy -> "fail"
-    gamemgr.on_disconnect(cfg4, "host", lookup)                                      # ... a potem okno hosta zamkniete
-    c3, *_ = setup_of(gamemgr.create_game(cfg4, "host", req, ["guest"], lookup))
+    gamemgr.watchdog_expired(cfgC, c2)                                               # 14 s ciszy -> "fail"
+    gamemgr.on_disconnect(cfgC, "host", lookup)                                      # ... a potem okno hosta zamkniete
+    c3, *_ = gamemgr.create_game(cfgC, "host", req, ["guest"], lookup)
     check("rozlaczenie hosta po werdykcie watchdoga to crash, nie porazka: poziom 2 jest powtorzony",
           gamemgr.attempt_info(c3)[0] == 2 and "rozlaczeniem" in gamemgr.GAMES[c3]["variant_why"],
           gamemgr.GAMES[c3]["variant_why"])
-    gamemgr.on_disconnect(cfg4, "host", lookup)                                      # drugi crash tego samego poziomu
-    c4, *_ = setup_of(gamemgr.create_game(cfg4, "host", req, ["guest"], lookup))
-    check("po drugim rozlaczeniu na tym samym poziomie uznajemy go za nieudany (i sprawdzamy cel 6)",
-          gamemgr.attempt_info(c4)[0] == 6 and 2 in json.loads(cfg4.gm_variant_path.read_text())["bad"],
+    gamemgr.on_disconnect(cfgC, "host", lookup)                                      # drugi crash tego samego poziomu
+    c4, *_ = gamemgr.create_game(cfgC, "host", req, ["guest"], lookup)
+    check("po drugim rozlaczeniu na tym samym poziomie uznajemy go za nieudany (i sprawdzamy cel)",
+          gamemgr.attempt_info(c4)[0] == gamemgr.MAX_LEVEL and 2 in json.loads(cfgC.gm_variant_path.read_text())["bad"],
           gamemgr.GAMES[c4]["variant_why"])
-    # plik stanu z innej wersji formatu (wynik z crasha na starej grze) jest ignorowany
-    stale_state = cfg4.gm_variant_path
-    stale_state.write_text('{"level": 2, "result": "fail", "good": [1], "bad": []}', encoding="utf-8")
-    c5, *_ = setup_of(gamemgr.create_game(cfg4, "host", req, ["guest"], lookup))
+    # plik stanu z innej wersji formatu jest ignorowany
+    cfgC.gm_variant_path.write_text('{"level": 2, "result": "fail", "good": [1], "bad": []}', encoding="utf-8")
+    c5, *_ = gamemgr.create_game(cfgC, "host", req, ["guest"], lookup)
     check("stary plik stanu drabinki (bez wersji) jest ignorowany -- start od poziomu 1",
           gamemgr.attempt_info(c5)[0] == 1)
     gamemgr.reset()

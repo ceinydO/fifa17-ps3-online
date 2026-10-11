@@ -39,23 +39,23 @@ W RPCS3 hosta: czy pojawia sie `sceNpBasicSendMessageGui` (zaproszenie) i czy UD
 Przelaczniki (po jednym): `gm_fifa17_union_tags`, `gm_indirect_join`, `gm_host_initial_state` (4),
 `gm_faithful_flow`, `gm_deferred_pregame`, `serve_entitlements`, `serve_messaging`.
 
-## Drabinka poziomow NotifyGameSetup (test po 2026-10-10)
-Cel: znalezc najnowszy ksztalt pierwszego setupu, po ktorym klient hosta dochodzi do `finalizeGameCreation`
-(patrz README, "Test 2026-10-10" i "drabinka poziomow").
-1. Host i kolega: `git pull`. Host uruchamia `.\update_and_run.ps1` (serwer ma dzialac przez wszystkie proby).
-   Opcjonalnie skasuj `state/gm_variant.json`, zeby zaczac od poziomu 1.
+## Drabinka poziomow NotifyGameSetup (test po 2026-10-11)
+Cel: znalezc ksztalt setupu, po ktorym host dochodzi do `finalizeGameCreation` ORAZ UI hosta wysyla zaproszenie
+(`sceNpBasicSendMessageGui`) -- kolega ma dostac zaproszenie od RPCN. Patrz README, "Test 2026-10-11".
+1. Host i kolega: `git pull`. Host uruchamia `.\update_and_run.ps1` (serwer ma dzialac przez wszystkie proby);
+   obaj uruchamiaja emulator od nowa i loguja sie do Online Friendlies.
 2. Host: Online Friendlies -> zaproszenie kolegi. Poczekaj ~15 s. W logu serwera: `POZIOM n (...)`, potem
-   `finalizeGameCreation od ... SUKCES poziomu n` albo `WATCHDOG ... BRAK finalizeGameCreation`.
-3. Po sukcesie ekran hosta wroci do poprzedniego widoku (jak dawniej) -- zrob zaproszenie JESZCZE RAZ: serwer
-   najpierw usunie stara gre (`NotifyGameRemoved` dla hosta i kolegi), potem sprobuje poziom wyzej. Po porazce
-   (watchdog usuwa gre) tez po prostu ponow; serwer wroci do dzialajacego poziomu.
+   `SUKCES poziomu n` albo `WATCHDOG ... BRAK finalizeGameCreation`. KOLEGA patrzy, czy pojawia sie zaproszenie
+   (powiadomienie RPCS3 / ekran FIFA). Zapisz godzine, jesli sie pojawi.
+3. Ponow zaproszenie kolejny raz (serwer usunie stara gre i wezmie kolejny poziom: 1 -> 2 -> ... -> 5). Zaproszenie moze
+   pojawic sie na dowolnym poziomie; po jego zaakceptowaniu kolega wysle `joinGame` (widac w `gm_attempts.log`).
+   Gdy zaproszenie dojdzie, przypnij poziom: w `config.json` `"gm_variant": <numer>` i zrestartuj serwer.
    Jesli emulator hosta sie zawiesi/wywali (w logu RPCS3 `Access violation` / `Emulation has been frozen`), zamknij
    tylko emulator hosta (serwer zostaje), uruchom go ponownie i ponow -- to rozlaczenie NIE liczy sie jako porazka
    poziomu, ten sam poziom zostanie powtorzony (po drugim takim rozlaczeniu na jednym poziomie uznany za nieudany).
    Zapisz, co WIDAC na ekranie hosta i kolegi po kazdej probie (czy jest "please wait", blad, powrot do menu,
-   okno zaproszenia).
-4. Powtarzaj, az poziom 6 przejdzie albo zobaczysz, od ktorego poziomu przestaje dzialac.
-5. Po tescie (serwer moze dzialac dalej): `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` -- tworzy
+   okno zaproszenia) i po ilu sekundach.
+4. Po tescie (serwer moze dzialac dalej): `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` -- tworzy
    `fifa17_logs_<data>.zip` (logi sesji serwera, `gm_attempts.log`, przechwyty polaczen z 3 godzin, `state\gm_variant.json`,
    `config.json`). Wyslij ten zip + `RPCS3.log` hosta i kolegi (RPCS3.log trzeba skopiowac zaraz po tescie, zanim
    emulator nadpisze go przy nastepnym uruchomieniu).
@@ -68,4 +68,4 @@ Cel: znalezc najnowszy ksztalt pierwszego setupu, po ktorym klient hosta dochodz
 - Sondy: gdy host milczy po setupie, po 3/6/9 s serwer wypycha kolejne powiadomienia (PlatformHostInitialized; stan
   gracza CONNECTED + JoinCompleted; GameStateChange) i loguje, po ktorej sondzie klient ruszyl. Wylaczenie:
   `"gm_probes": false`.
-Wymuszenie poziomu: `"gm_variant": 4` w `config.json` (1-6); `-1` = pojedyncze przelaczniki `gm_*`.
+Wymuszenie poziomu: `"gm_variant": 3` w `config.json` (1-5); `-1` = pojedyncze przelaczniki `gm_*`.
