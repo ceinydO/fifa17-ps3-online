@@ -116,6 +116,12 @@ def main(argv):
             print("%s%9.3f %-14s EVT  %s" % (wall, ts, th[:14], ev["evname"]))
             continue
         a = ev["args"]
+        if ev["id"] == 0x50:
+            def cc(v):
+                b = v.to_bytes(4, "big")
+                return b.decode("latin-1") if all(32 <= c < 127 for c in b) else "%08X" % v
+            print("%s%9.3f %-14s OSDK %s/%s" % (wall, ts, th[:14], cc(a.get(0, 0)), cc(a.get(1, 0))))
+            continue
         print("%s%9.3f %-14s 0x%02X %-52s r3=%08X r4=%08X r5=%08X" % (
             wall, ts, th[:14], ev["id"], NAMES.get(ev["id"], "?"), a.get(0, 0), a.get(1, 0), a.get(2, 0)))
     return 0

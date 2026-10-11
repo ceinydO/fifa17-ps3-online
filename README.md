@@ -48,7 +48,7 @@ Nie wiadomo, **na ktorym ogniwie lancuch sie zatrzymuje** (UI w ogole nie wola a
 op konczy sie bledem) -- dlatego nowe narzedzie ponizej.
 
 **Nowe narzedzie: lata-znaczniki RPCS3 (`tools/make_trace_patch.py`, `tools/rpcs3_patch_trace_invites.yml`).**
-Podmienia drugie slowo (`bl _savegpr_N`) w 18 funkcjach (lancuch zaproszenia, `post_event` = KAZDE zdarzenie UI
+Podmienia drugie slowo (`bl _savegpr_N`) w 39 funkcjach (lancuch zaproszenia, `post_event` = KAZDE zdarzenie UI
 `EVENT_*`, handlery NP, operacje SportsWorld) na `bl` do stuba w nieuzywanym obszarze `0x0211D810`; stub wola
 wspolna procedure, ktora zachowuje wszystkie rejestry i loguje argumenty przez `cellRtcSetTime_t` (RPCS3 drukuje
 `iTime=0xFA<id><k><wartosc>`). Dekoder: `tools/decode_trace.py RPCS3.log --elf EBOOT.ELF` (nazwy zdarzen czyta z

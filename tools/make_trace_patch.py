@@ -25,6 +25,7 @@ Uzycie:
     python tools/make_trace_patch.py            # zapisuje tools/rpcs3_patch_trace_invites.yml
     python tools/make_trace_patch.py --selftest # sprawdza kodowanie (capstone, jesli jest) i semantyke (emulator)
     python tools/make_trace_patch.py --check    # porownuje plik z generowanym (do selftestu repo)
+    python tools/make_trace_patch.py --verify-elf EBOOT.ELF   # sprawdza cele na prawdziwym EBOOT (mflr + bl H)
 """
 from __future__ import annotations
 
@@ -59,6 +60,28 @@ TARGETS = [
     (0x42, "SportsWorld: SendFriendsToSportsWorld", 0x0030F068, 0x0195553C, 3),
     (0x43, "SportsWorld: LoadSportsWorldUsers", 0x00311FDC, 0x01955538, 3),
     (0x44, "SportsWorld: SendMatchupStatsToSportsWorld", 0x0030E498, 0x0195551C, 3),
+    # --- runda 2: dlaczego po createGame nie ma EVENT_CREATEGAME_SUCCESS ---
+    (0x50, "OSDK trace(kategoria 4cc, zdarzenie 4cc)", 0x002E8448, 0x01955538, 3),
+    (0x51, "GameSessionManager::createGame(parametry, listener)", 0x0028EFA4, 0x01955510, 3),
+    (0x52, "CreateGame op: konstruktor", 0x0028E208, 0x01955518, 3),
+    (0x53, "adaptor UI CreateGame (1624180)", 0x01624180, 0x01955538, 3),
+    (0x54, "GameSession: konstruktor", 0x002891E4, 0x01955534, 3),
+    (0x55, "gses::setCurrentSession", 0x002911B8, 0x01955538, 3),
+    (0x56, "SetPlayerAttribute op: utworzenie (po createGame)", 0x0028A384, 0x01955534, 3),
+    (0x57, "createGame: koniec po SetPlayerAttribute (2deb88)", 0x002DEB88, 0x01955540, 3),
+    (0x58, "createGame: porazka (2ded74)", 0x002DED74, 0x01955540, 3),
+    (0x59, "listener createGame: SUKCES (1624e1c)", 0x01624E1C, 0x0195553C, 3),
+    (0x5A, "listener createGame: PORAZKA (1624e9c)", 0x01624E9C, 0x01955544, 3),
+    (0x5B, "Blaze: handler NotifyGameSetup", 0x00C6E0B8, 0x0195551C, 3),
+    (0x5C, "Blaze: onNetworkCreated (c6a4e0)", 0x00C6A4E0, 0x01955530, 3),
+    (0x5D, "Blaze: wysylka finalizeGameCreation (c6a204)", 0x00C6A204, 0x0195553C, 3),
+    (0x5E, "Blaze: odpowiedz na finalizeGameCreation (c6bf74)", 0x00C6BF74, 0x0195553C, 3),
+    (0x5F, "FSM poczekalni: start (4d087c)", 0x004D087C, 0x01955538, 3),
+    (0x60, "FSM poczekalni: przerwanie/timeout (4cf708)", 0x004CF708, 0x01955538, 3),
+    (0x61, "FSM poczekalni: konsument zdarzen (4d0aa4)", 0x004D0AA4, 0x01955514, 3),
+    (0x62, "FSM poczekalni: 4cf59c", 0x004CF59C, 0x01955530, 3),
+    (0x63, "FifaOnline::StartInviteFlowPrep (4cf1f8)", 0x004CF1F8, 0x01955538, 3),
+    (0x64, "GameInviteScreenAbort (4cf2f8)", 0x004CF2F8, 0x0195553C, 3),
 ]
 
 
@@ -417,7 +440,40 @@ def selftest():
     return ok
 
 
+def verify_elf(path):
+    """Sprawdza na prawdziwym EBOOT.ELF, ze kazdy cel zaczyna sie od `mflr r0` i ma w T+4 `bl H` z H z tabeli."""
+    d = open(path, "rb").read()
+    phoff = struct.unpack(">Q", d[32:40])[0]
+    n = struct.unpack(">H", d[56:58])[0]
+    segs = []
+    for i in range(n):
+        o = phoff + i * 56
+        t, fl, off, va, pa, fs, ms = struct.unpack(">IIQQQQQ", d[o:o + 48])
+        if t == 1 and fs:
+            segs.append((va, off, fs))
+
+    def u32(va):
+        for v, o, fs in segs:
+            if v <= va < v + fs:
+                return struct.unpack(">I", d[o + va - v:o + va - v + 4])[0]
+        raise ValueError(hex(va))
+    bad = 0
+    for mid, name, t, h, mode in TARGETS:
+        w0, w1 = u32(t), u32(t + 4)
+        off = w1 & 0x03FFFFFC
+        if off & 0x2000000:
+            off -= 0x4000000
+        ok = w0 == 0x7C0802A6 and (w1 >> 26) == 18 and (w1 & 3) == 1 and ((t + 4 + off) & 0xFFFFFFFF) == h
+        if not ok:
+            bad += 1
+            print("NIEZGODNE 0x%02X %s 0x%08X: %08X %08X" % (mid, name, t, w0, w1))
+    print("sprawdzono %d celow na %s, niezgodnych: %d" % (len(TARGETS), path, bad))
+    return bad == 0
+
+
 def main(argv):
+    if "--verify-elf" in argv:
+        return 0 if verify_elf(argv[argv.index("--verify-elf") + 1]) else 1
     if "--selftest" in argv:
         return 0 if selftest() else 1
     text = render_yaml()
