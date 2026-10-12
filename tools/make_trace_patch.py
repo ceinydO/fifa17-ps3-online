@@ -70,18 +70,12 @@ TARGETS = [
     (0x42, "SportsWorld: SendFriendsToSportsWorld", 0x0030F068, 0x0195553C, 3),
     (0x43, "SportsWorld: LoadSportsWorldUsers", 0x00311FDC, 0x01955538, 3),
     (0x44, "SportsWorld: SendMatchupStatsToSportsWorld", 0x0030E498, 0x0195551C, 3),
-    # --- runda 2: dlaczego po createGame nie ma EVENT_CREATEGAME_SUCCESS ---
+    # --- runda 2 (znaczniki 0x53, 0x56-0x5A usuniete w rundzie 4: potwierdzone, ze ta sciezka nie jest uzywana) ---
     (0x50, "OSDK trace(kategoria 4cc, zdarzenie 4cc)", 0x002E8448, 0x01955538, 3),
     (0x51, "GameSessionManager::createGame(parametry, listener)", 0x0028EFA4, 0x01955510, 3),
     (0x52, "CreateGame op: konstruktor", 0x0028E208, 0x01955518, 3),
-    (0x53, "adaptor UI CreateGame (1624180)", 0x01624180, 0x01955538, 3),
     (0x54, "GameSession: konstruktor", 0x002891E4, 0x01955534, 3),
     (0x55, "gses::setCurrentSession", 0x002911B8, 0x01955538, 3),
-    (0x56, "SetPlayerAttribute op: utworzenie (po createGame)", 0x0028A384, 0x01955534, 3),
-    (0x57, "createGame: koniec po SetPlayerAttribute (2deb88)", 0x002DEB88, 0x01955540, 3),
-    (0x58, "createGame: porazka (2ded74)", 0x002DED74, 0x01955540, 3),
-    (0x59, "listener createGame: SUKCES (1624e1c)", 0x01624E1C, 0x0195553C, 3),
-    (0x5A, "listener createGame: PORAZKA (1624e9c)", 0x01624E9C, 0x01955544, 3),
     (0x5B, "Blaze: handler NotifyGameSetup", 0x00C6E0B8, 0x0195551C, 3),
     (0x5C, "Blaze: onNetworkCreated (c6a4e0)", 0x00C6A4E0, 0x01955530, 3),
     (0x5D, "Blaze: wysylka finalizeGameCreation (c6a204)", 0x00C6A204, 0x0195553C, 3),
@@ -102,10 +96,6 @@ TARGETS = [
     (0x77, "listener zaproszen: USER_INVITE sukces (16495b4)", 0x016495B4, 0x01955540, 3),
     (0x78, "listener zaproszen: USER_INVITE porazka (164964c)", 0x0164964C, 0x01955540, 3),
     (0x79, "EVENT_MATCHUP_SUCCESS: nadawca zdarzenia (1625504)", 0x01625504, 0x0195553C, 3),
-    (0x7A, "inny listener createGame (1624b68)", 0x01624B68, 0x0195553C, 3),
-    (0x7B, "inny listener createGame (1624c14)", 0x01624C14, 0x0195553C, 3),
-    (0x7C, "inny listener createGame (1624cf0)", 0x01624CF0, 0x01955544, 3),
-    (0x7D, "GameSessionManager vt+0x10 (28fdfc)", 0x0028FDFC, 0x01955520, 3),
     (0x7E, "GameSessionManager JoinGame? (290b18)", 0x00290B18, 0x0195552C, 3),
     (0x7F, "GameSessionManager JoinGame? (290dd8)", 0x00290DD8, 0x0195552C, 3),
 ]
@@ -119,12 +109,21 @@ MIDS = [
 
 
 # ---------------------------------------------------------------- mini asembler (tylko uzywane instrukcje)
-# ---------------------------------------------------------------- EKSPERYMENT: wymus OnOnlineCreateSession
-EXP_NAME = "FIFA eksperyment - wymus OnOnlineCreateSession po createGame"
+# ---------------------------------------------------------------- EKSPERYMENT: wyslij zaproszenie natywnie po createGame
+# Wynik rundy 3: skrypt UI NIGDY nie wola natywnego SendGameInvite (adaptor 0x16491b4) -- ani razu w 11 probach createGame.
+# Ten wpis robi to za skrypt: po udanym createGame bierze pierwszego znajomego RPCN (sceNpBasicGetFriendPresenceByIndex)
+# i wola adaptor tak, jak zrobilby UI: SendGameInvite(this, nazwa_PSN_znajomego, tekst, 0, 0, 0). Dalej dziala juz
+# oryginalny kod gry: puid (sceNpLookupNpId) -> 0x30262c -> 0x302454 -> sceNpBasicSendMessageGui.
+EXP_NAME = "FIFA eksperyment - wyslij zaproszenie do znajomego po createGame"
 EXP_AT = 0x002DEF7C                  # `li r3,4` tuz po wywolaniu listenera w callbacku createGame (2dee08)
 EXP_DISPLACED = 0x38600004
-EXP_FN_SCRIPT_MGR, EXP_FN_FMT, EXP_FN_CALL_SCRIPT = 0x0038A5AC, 0x00287C5C, 0x0038ADE4
-EXP_STR_FN, EXP_STR_EVT = 0x01F00A6C, 0x01EFFC8C        # "OnOnlineCreateSession", "EVENT_CREATEGAME_SUCCESS"
+EXP_FN_GET_FRIEND = 0x01EA1718       # import sceNpBasicGetFriendPresenceByIndex(index, SceNpUserInfo*, pres*, options)
+EXP_FN_SEND_INVITE = 0x016491B4      # adaptor SendGameInvite(this, const char* nazwa, const char* tekst, lista, lista, ctx)
+EXP_GLOBAL_HI, EXP_GLOBAL_LO = 0x257, -0x5C90   # *(0x256A370) = obiekt zewnetrzny; adaptor = obiekt + 8 (fabryka 0x164aa54)
+EXP_TEXT = "FIFA 17 - zapraszam na mecz (Online Friendlies)"       # tresc (body) zaproszenia
+EXP_SUBJECT = "FIFA 17 Online Friendlies"                           # temat; MUSI byc niepusty (FIFA wysyla cechy 6 = ASSUME_SEND,
+                                                                    # a RPCS3 wtedy odrzuca pusty temat jako INVALID_ARGUMENT)
+EXP_LOG_ID = 0x81                    # znacznik: k=0 wynik GetFriendPresenceByIndex, k=1/2 pierwsze 8 znakow nazwy, k=3 adaptor
 
 
 def _ds(op, rs, ra, d, xo):
@@ -135,6 +134,9 @@ def std(rs, d, ra): return _ds(62, rs, ra, d, 0)
 def stdu(rs, d, ra): return _ds(62, rs, ra, d, 1)
 def ld(rd, d, ra): return _ds(58, rd, ra, d, 0)
 def lwz(rd, d, ra): return (32 << 26) | (rd << 21) | (ra << 16) | (d & 0xFFFF)
+def stw(rs, d, ra): return (36 << 26) | (rs << 21) | (ra << 16) | (d & 0xFFFF)
+def extsw(ra, rs): return (31 << 26) | (rs << 21) | (ra << 16) | (986 << 1)
+def cmpwi(ra, imm): return (11 << 26) | (0 << 23) | (ra << 16) | (imm & 0xFFFF)   # cmpwi cr0, ra, imm
 def stfd(fr, d, ra): return (54 << 26) | (fr << 21) | (ra << 16) | (d & 0xFFFF)
 def lfd(fr, d, ra): return (50 << 26) | (fr << 21) | (ra << 16) | (d & 0xFFFF)
 def addi(rd, ra, imm): return (14 << 26) | (rd << 21) | (ra << 16) | (imm & 0xFFFF)
@@ -162,6 +164,16 @@ def _md(rs, ra, sh, mbme, xo):
 
 def sldi(ra, rs, n): return _md(rs, ra, n, 63 - n, 1)           # rldicr ra,rs,n,63-n
 def clrldi(ra, rs, n): return _md(rs, ra, 0, n, 0)              # rldicl ra,rs,0,n
+
+
+def _bc(src, dst, bo, bi):
+    off = dst - src
+    assert off % 4 == 0 and -(1 << 15) <= off < (1 << 15), (hex(src), hex(dst))
+    return (16 << 26) | (bo << 21) | (bi << 16) | (off & 0xFFFC)
+
+
+def _bc_lt(src, dst): return _bc(src, dst, 12, 0)       # blt cr0
+def _bc_eq(src, dst): return _bc(src, dst, 12, 2)       # beq cr0
 
 
 def branch(src, dst, link):
@@ -246,35 +258,68 @@ def build_mid_stub(base, marker_id, common, displaced):
     return code
 
 
-EXP_FRAME = 0xC0
+EXP_FRAME = 0x300                    # 0x70 bufor RTC (16), 0x80 SceNpUserInfo (0xd8), 0x160 SceNpBasicPresenceDetails (0x188)
+EXP_OFF_RTC, EXP_OFF_USER, EXP_OFF_PRES, EXP_OFF_TMP = 0x70, 0x80, 0x160, 0x2F0
 
 
 def build_exp_stub(base):
-    """Odtwarza to, co FSM (4d0aa4) robi po EVENT_CREATEGAME_SUCCESS: OnOnlineCreateSession("EVENT_CREATEGAME_SUCCESS",
-    <id sesji jako tekst>). Wejscie przez `bl` z EXP_AT (po powrocie z listenera rejestry ulotne sa martwe, r28 = sesja)."""
+    """Zaproszenie natywne. Wejscie przez `bl` z EXP_AT (po powrocie z listenera rejestry ulotne sa martwe; r28 = sesja,
+    r30/r31 nietykalne). Zwraca liste slow: kod, potem tekst zaproszenia (zakonczony zerem, dopelniony do 4 bajtow)."""
     c = []
     e = c.append
+    calls = []                                   # (indeks slowa, adres docelowy) dla `bl`
+
+    def bl(target):
+        calls.append((len(c), target))
+        e(0)
+
+    def log(k, load):
+        e(load)
+        e(lis(4, 0xFA00 | EXP_LOG_ID)); e(ori(4, 4, k)); e(clrldi(4, 4, 32)); e(sldi(4, 4, 32)); e(or_(4, 4, 5))
+        e(addi(3, 1, EXP_OFF_RTC))
+        bl(RTC_STUB)
+
     e(stdu(1, -EXP_FRAME, 1))
     e(mflr(0)); e(std(0, EXP_FRAME + 0x10, 1))
-    e(addi(3, 28, 8))                       # r3 = sesja + 8
-    e(lwz(4, 8, 28)); e(lwz(4, 0, 4)); e(lwz(4, 0, 4))    # kod slotu 0 vtable podobiektu
-    e(mtctr(4)); e(BCTRL)                   # r3 = id gry
-    e(addi(4, 1, 0x70)); e(li(5, 10))
-    e(0); idx_fmt = len(c) - 1
-    e(std(3, 0xB0, 1))                      # wskaznik na tekst
-    e(0); idx_mgr = len(c) - 1
-    e(li(4, 0))
-    e(lis(5, EXP_STR_FN >> 16)); e(ori(5, 5, EXP_STR_FN & 0xFFFF))
-    e(lis(6, EXP_STR_EVT >> 16)); e(ori(6, 6, EXP_STR_EVT & 0xFFFF))
-    e(ld(7, 0xB0, 1)); e(li(8, 0))
-    e(0); idx_call = len(c) - 1
+    e(li(3, 0)); e(stw(3, EXP_OFF_USER, 1)); e(stw(3, EXP_OFF_USER + 4, 1))
+    e(li(3, 0)); e(addi(4, 1, EXP_OFF_USER)); e(addi(5, 1, EXP_OFF_PRES)); e(li(6, 0))
+    bl(EXP_FN_GET_FRIEND)                        # r3 = wynik (0 = OK)
+    e(std(3, EXP_OFF_TMP, 1))
+    log(0, lwz(5, EXP_OFF_TMP + 4, 1))           # wynik
+    log(1, lwz(5, EXP_OFF_USER, 1))              # pierwsze 4 znaki nazwy
+    log(2, lwz(5, EXP_OFF_USER + 4, 1))          # kolejne 4
+    e(ld(3, EXP_OFF_TMP, 1)); e(extsw(3, 3))
+    e(cmpwi(3, 0)); idx_skip1 = len(c); e(0)     # blt skip
+    e(lis(3, EXP_GLOBAL_HI)); e(lwz(3, EXP_GLOBAL_LO, 3))
+    e(cmpwi(3, 0)); idx_skip2 = len(c); e(0)     # beq skip
+    e(addi(3, 3, 8))                             # adaptor = obiekt + 8
+    e(addi(4, 1, EXP_OFF_USER))                  # nazwa PSN znajomego (SceNpUserInfo.userId.handle)
+    idx_text = len(c); e(0); e(0)                # lis/ori adresu tekstu (uzupelniane nizej)
+    idx_subj = len(c); e(0); e(0)                # lis/ori adresu tematu (r8 = ctx -> temat zaproszenia)
+    e(li(6, 0)); e(li(7, 0))
+    bl(EXP_FN_SEND_INVITE)
+    idx_skip = len(c)
     e(ld(0, EXP_FRAME + 0x10, 1)); e(mtlr(0))
     e(addi(1, 1, EXP_FRAME))
     e(EXP_DISPLACED); e(BLR)
-    c[idx_fmt] = branch(base + 4 * idx_fmt, EXP_FN_FMT, True)
-    c[idx_mgr] = branch(base + 4 * idx_mgr, EXP_FN_SCRIPT_MGR, True)
-    c[idx_call] = branch(base + 4 * idx_call, EXP_FN_CALL_SCRIPT, True)
+    for idx, target in calls:
+        c[idx] = branch(base + 4 * idx, target, True)
+    c[idx_skip1] = _bc_lt(base + 4 * idx_skip1, base + 4 * idx_skip)
+    c[idx_skip2] = _bc_eq(base + 4 * idx_skip2, base + 4 * idx_skip)
+    text, subj = _exp_str(EXP_TEXT), _exp_str(EXP_SUBJECT)
+    text_addr = base + 4 * len(c)
+    subj_addr = text_addr + len(text)
+    c[idx_text] = lis(5, text_addr >> 16)
+    c[idx_text + 1] = ori(5, 5, text_addr & 0xFFFF)
+    c[idx_subj] = lis(8, subj_addr >> 16)
+    c[idx_subj + 1] = ori(8, 8, subj_addr & 0xFFFF)
+    c += [struct.unpack(">I", (text + subj)[i:i + 4])[0] for i in range(0, len(text + subj), 4)]
     return c
+
+
+def _exp_str(txt):
+    b = txt.encode("ascii") + b"\0"
+    return b + b"\0" * (-len(b) % 4)
 
 
 def build_exp():
@@ -325,7 +370,7 @@ def render_yaml():
     w("#   %s:" % PPU_HASH)
     w("# (ten sam, pod ktorym masz juz inne patche) i wklej PONIZSZY wpis POD TYM KLUCZEM (z zachowaniem wciec).")
     w("# Potem: Patch Manager -> FIFA 17 -> BLES02233 v.01.00 -> zaznacz 'FIFA trace (zaproszenia i zdarzenia UI)'")
-    w("# oraz (tylko jesli chcesz sprobowac) 'FIFA eksperyment - wymus OnOnlineCreateSession po createGame'.")
+    w("# oraz (tylko jesli chcesz sprobowac) 'FIFA eksperyment - wyslij zaproszenie do znajomego po createGame'.")
     w("# Pierwsze uruchomienie po zmianie kompiluje PPU od nowa (kilka minut) -- to normalne.")
     w("#")
     w("# Znaczniki:")
@@ -355,7 +400,7 @@ def render_yaml():
     w("      FIFA 17:")
     w('        BLES02233: [ "01.00" ]')
     w('    Author: "custom"')
-    w('    Notes: "Po udanym createGame (callback 2dee08) wywoluje skrypt UI OnOnlineCreateSession(EVENT_CREATEGAME_SUCCESS) -- to, czego brakuje, bo listener nie wysyla zdarzenia"')
+    w('    Notes: "Po udanym createGame wola natywnie SendGameInvite (adaptor 16491b4) dla pierwszego znajomego RPCN -- to, czego nie robi skrypt UI"')
     w('    Patch Version: "1.0"')
     w("    Patch:")
     w("          - [ be32, 0x%08X, 0x%08X ]   # 2def7c: li r3,4 -> bl stub 0x%08X" % (exp_at, exp_bl, exp_stub))
@@ -439,6 +484,22 @@ class Emu:
         elif op == 32:
             ea = ((R[ra] if ra else 0) + self.s16(imm)) & M
             R[rd] = struct.unpack(">I", self.rd(ea, 4))[0]
+        elif op == 36:                                       # stw
+            ea = ((R[ra] if ra else 0) + self.s16(imm)) & M
+            self.w(ea, struct.pack(">I", R[rd] & 0xFFFFFFFF))
+        elif op == 11:                                       # cmpwi cr0
+            a = R[ra] & 0xFFFFFFFF
+            a = a - (1 << 32) if a & 0x80000000 else a
+            b = self.s16(imm)
+            nib = 8 if a < b else (4 if a > b else 2)
+            self.cr = (self.cr & 0x0FFFFFFF) | (nib << 28)
+        elif op == 16:                                       # bc (tylko BO=12: skocz, gdy bit CR ustawiony)
+            bo, bi = rd, ra
+            assert bo == 12 and not (w & 3), hex(w)
+            if (self.cr >> (31 - bi)) & 1:
+                off = self.s16(imm & 0xFFFC)
+                self.pc = (self.pc + off) & M
+                return
         elif op == 54:
             self.st64((R[ra] + self.s16(imm)) & M, self.f[rd])
         elif op == 50:
@@ -453,6 +514,9 @@ class Emu:
             xo = (w >> 1) & 0x3FF
             if xo == 444:                                    # or
                 R[ra] = R[rd] | R[rb]
+            elif xo == 986:                                  # extsw
+                v = R[rd] & 0xFFFFFFFF
+                R[ra] = (v | ~0xFFFFFFFF) & M if v & 0x80000000 else v
             elif xo == 339:                                  # mfspr
                 spr = ((w >> 16) & 31) | (((w >> 11) & 31) << 5)
                 R[rd] = {8: self.lr, 9: self.ctr}[spr]
@@ -525,7 +589,7 @@ def _make_rtc(logged, rng):
         for n in range(0, 14):
             emu.f[n] = rng.getrandbits(64)
         emu.ctr = rng.getrandbits(64)
-        emu.cr = rng.getrandbits(32)
+        emu.cr = (emu.cr & 0x00FFF000) | (rng.getrandbits(32) & ~0x00FFF000)     # cr2-4 sa nieulotne (ABI)
         emu.pc = emu.lr
     return rtc
 
@@ -563,64 +627,100 @@ def _yaml_check():
 
 
 def _exp_selftest():
-    """Eksperyment: kolejnosc i argumenty wywolan oraz zachowanie rejestrow nieulotnych (r14-r31, f14-f31, cr2-4)."""
+    """Eksperyment (natywne SendGameInvite): argumenty adaptora, logi, przypadki bledow, rejestry nieulotne (r14-r31, cr2-4)."""
     rng = random.Random(77)
     exp_words, (at, bl, stub) = build_exp()
-    e = _fresh_emu(exp_words, rng)
-    e.w(at, struct.pack(">I", bl))
-    sess, vptr, opd, code = 0x10D9E310, 0x20000000, 0x20000100, 0x20000200
-    e.w(sess + 8, struct.pack(">I", vptr))
-    e.w(vptr, struct.pack(">I", opd))
-    e.w(opd, struct.pack(">I", code))
-    calls = []
+    ok_all = True
+    glob = (EXP_GLOBAL_HI << 16) + EXP_GLOBAL_LO
+    for scenario in ("ok", "brak_znajomego", "brak_adaptora"):
+        e = _fresh_emu(exp_words, rng)
+        e.w(at, struct.pack(">I", bl))
+        outer = 0x10F00000
+        e.w(glob, struct.pack(">I", 0 if scenario == "brak_adaptora" else outer))
+        calls, logged = [], []
+        user_buf = {}
 
-    def hook(name, ret):
-        def f(emu):
-            calls.append((name, [emu.r[n] & 0xFFFFFFFF for n in range(3, 9)]))
-            emu.r[3] = ret
-            for n in list(range(4, 13)) + [0]:           # funkcje wolane niszcza rejestry ulotne
+        def get_friend(emu):
+            calls.append(("znajomy", [emu.r[n] & 0xFFFFFFFF for n in range(3, 7)]))
+            user_buf["p"] = emu.r[4]
+            if scenario == "brak_znajomego":
+                emu.r[3] = 0xFFFFFFFF80021003               # blad (ujemny wynik 32-bit, rozszerzony)
+            else:
+                emu.w(emu.r[4], b"odyniec1\0")
+                emu.r[3] = 0
+            for n in list(range(4, 13)) + [0]:
                 emu.r[n] = rng.getrandbits(64)
             emu.pc = emu.lr
-        return f
-    e.hooks[code] = hook("id_gry", 0x1234)
-    e.hooks[EXP_FN_FMT] = hook("fmt", 0xD0AAAA00)
-    e.hooks[EXP_FN_SCRIPT_MGR] = hook("mgr", 0x0BADF00D)
-    e.hooks[EXP_FN_CALL_SCRIPT] = hook("wywolaj_skrypt", 0)
-    e.r[28] = sess
-    for n in list(range(14, 28)) + [29, 30, 31]:
-        e.r[n] = rng.getrandbits(64)
-    before = (list(e.r), list(e.f), e.cr)
-    e.lr = at + 4
-    e.pc = stub
-    e.hooks[at + 4] = lambda emu: (_ for _ in ()).throw(StopIteration)
-    try:
-        e.run(at + 4)
-    except StopIteration:
-        pass
-    problems = []
-    names = [c[0] for c in calls]
-    if names != ["id_gry", "fmt", "mgr", "wywolaj_skrypt"]:
-        problems.append("kolejnosc %s" % names)
-    else:
-        if calls[0][1][0] != sess + 8: problems.append("r3(id)")
-        if calls[1][1][:3] != [0x1234, (before[0][1] - EXP_FRAME + 0x70) & 0xFFFFFFFF, 10]: problems.append("fmt(args)")
-        a = calls[3][1]
-        if a != [0x0BADF00D, 0, EXP_STR_FN, EXP_STR_EVT, 0xD0AAAA00, 0]: problems.append("skrypt(args)=%s" % a)
-    if e.pc != at + 4: problems.append("pc=%x" % e.pc)
-    if e.r[3] != 4: problems.append("r3 (podmieniona instrukcja)")
-    if e.r[1] != before[0][1]: problems.append("r1")
-    for n in list(range(14, 32)) + [2]:
-        if e.r[n] != before[0][n]: problems.append("r%d" % n)
-    if e.cr != before[2]: problems.append("cr")
-    print("%-4s eksperyment: OnOnlineCreateSession (stub 0x%08X, %d slow) %s" % (
-        "OK" if not problems else "BLAD", stub, len(exp_words), ",".join(problems)))
-    return not problems
+
+        def send_invite(emu):
+            txt = bytearray()
+            a_ = emu.r[5]
+            while emu.mem.get(a_, 0):
+                txt.append(emu.mem[a_]); a_ += 1
+            name = bytearray()
+            a_ = emu.r[4]
+            while emu.mem.get(a_, 0):
+                name.append(emu.mem[a_]); a_ += 1
+            subj = bytearray()
+            a_ = emu.r[8]
+            while emu.mem.get(a_, 0):
+                subj.append(emu.mem[a_]); a_ += 1
+            calls.append(("zaproszenie", [emu.r[3] & 0xFFFFFFFF, bytes(name), bytes(txt)] +
+                          [emu.r[4] & 0xFFFFFFFF, emu.r[6] & 0xFFFFFFFF, emu.r[7] & 0xFFFFFFFF, bytes(subj)]))
+            for n in list(range(3, 13)) + [0]:
+                emu.r[n] = rng.getrandbits(64)
+            emu.pc = emu.lr
+        e.hooks[EXP_FN_GET_FRIEND] = get_friend
+        e.hooks[EXP_FN_SEND_INVITE] = send_invite
+        e.hooks[RTC_STUB] = _make_rtc(logged, rng)
+        e.r[28] = 0x10D9E310
+        for n in list(range(14, 28)) + [29, 30, 31]:
+            e.r[n] = rng.getrandbits(64)
+        before = (list(e.r), list(e.f), e.cr)
+        e.lr = at + 4
+        e.pc = stub
+        e.hooks[at + 4] = lambda emu: (_ for _ in ()).throw(StopIteration)
+        try:
+            e.run(at + 4)
+        except StopIteration:
+            pass
+        problems = []
+        names = [c[0] for c in calls]
+        want_names = {"ok": ["znajomy", "zaproszenie"], "brak_znajomego": ["znajomy"],
+                      "brak_adaptora": ["znajomy", "zaproszenie"][:1]}[scenario]
+        if names != want_names:
+            problems.append("wywolania %s" % names)
+        elif scenario == "ok":
+            inv = calls[1][1]
+            if inv[0] != outer + 8: problems.append("adaptor this=%x" % inv[0])
+            if inv[1] != b"odyniec1": problems.append("nazwa=%r" % inv[1])
+            if inv[2].decode() != EXP_TEXT: problems.append("tekst=%r" % inv[2])
+            if inv[3] != (user_buf["p"] & 0xFFFFFFFF) or inv[4:6] != [0, 0]: problems.append("r4/r6/r7 %s" % inv[3:6])
+            if inv[6].decode() != EXP_SUBJECT: problems.append("temat=%r" % inv[6])
+            if user_buf["p"] != (before[0][1] - EXP_FRAME + EXP_OFF_USER): problems.append("bufor nie na stosie")
+        want_res = 0 if scenario == "ok" else (0x80021003 if scenario == "brak_znajomego" else 0)
+        name_words = (0x6F64796E, 0x69656331) if scenario != "brak_znajomego" else (0, 0)
+        want_log = [((0xFA000000 | (EXP_LOG_ID << 16) | k) << 32) | v for k, v in
+                    ((0, want_res), (1, name_words[0]), (2, name_words[1]))]
+        if logged != want_log:
+            problems.append("log %s != %s" % ([hex(x) for x in logged], [hex(x) for x in want_log]))
+        if e.pc != at + 4: problems.append("pc=%x" % e.pc)
+        if e.r[3] != 4: problems.append("r3 (podmieniona instrukcja)")
+        if e.r[1] != before[0][1]: problems.append("r1")
+        for n in list(range(14, 32)) + [2]:
+            if e.r[n] != before[0][n]: problems.append("r%d" % n)
+        if (e.cr & 0x00FFF000) != (before[2] & 0x00FFF000): problems.append("cr2-4")
+        print("%-4s eksperyment (%s): natywne SendGameInvite (stub 0x%08X, %d slow) %s" % (
+            "OK" if not problems else "BLAD", scenario, stub, len(exp_words), ",".join(problems)))
+        ok_all = ok_all and not problems
+    return ok_all
 
 
 def selftest():
     words, hooks, (commons, end) = build_all()
     exp_words, (exp_at, exp_bl, _stub) = build_exp()
-    ok = _capstone_check(words + [(a, w) for a, w, *_ in hooks] + exp_words + [(exp_at, exp_bl)])
+    n_text = (len(_exp_str(EXP_TEXT)) + len(_exp_str(EXP_SUBJECT))) // 4      # ostatnie slowa stuba to teksty, nie instrukcje
+    ok = _capstone_check(words + [(a, w) for a, w, *_ in hooks] + exp_words[:-n_text] + [(exp_at, exp_bl)])
     rng = random.Random(1234)
     for mid, name, target, helper, mode in TARGETS:
         logged = []

@@ -8,6 +8,8 @@ funkcja zostala wywolana, z argumentami r3/r4/r5. Dla zdarzen UI (znacznik 0x01)
 (wymaga --elf = EBOOT.ELF z tej samej wersji gry; bez tego wypisuje sam adres napisu).
 Zwykle zdarzenia sa domyslnie pomijane, jesli wystepuja bardzo czesto -- --all wypisuje wszystkie.
 Dodatkowo pokazuje wywolania NP (sceNpBasic*), zeby bylo widac je obok znacznikow.
+Runda 4: znacznik 0x81 = wynik eksperymentu "natywne SendGameInvite" (kto jest pierwszym znajomym RPCN; potem powinny
+pojawic sie 0x10 adaptor SendGameInvite, 0x12/0x13/0x14/0x15/0x16 lancuch zaproszenia i `sceNpBasicSendMessageGui`).
 Runda 3: przy kazdym znaczniku "<- LR (fn START)" = kto wolal (wymaga --elf); znacznik 0x70 pokazuje, jaki kod
 listenera zostal wywolany po udanym createGame; 0x71/0x72 to wywolania funkcji skryptow UI ("Handle_<nazwa>").
 """
@@ -25,6 +27,7 @@ from make_trace_patch import TARGETS, MIDS      # noqa: E402
 
 NAMES = {t[0]: t[1] for t in TARGETS}
 NAMES.update({t[0]: t[1] for t in MIDS})
+NAMES[0x81] = "eksperyment: natywne SendGameInvite"
 MID_IDS = {t[0] for t in MIDS}
 LINE = re.compile(r"^\S+\s+(\d+):(\d\d):(\d\d)\.(\d+)\s+(?:\{([^}]*)\}\s+)?(.*)$")
 RTC = re.compile(r"cellRtcSetTime_t\(pDateTime=\*0x[0-9a-fA-F]+, iTime=0x([0-9a-fA-F]+)\)")
@@ -173,6 +176,12 @@ def main(argv):
             nm = elf.cstr(a.get(2, 0)) if elf else None
             print("%s UI-SKRYPT %s(%s, %s)%s" % (head, nm or "%08X" % a.get(2, 0), txt(a.get(5, 0)), txt(a.get(6, 0)),
                                                 who(lr)))
+            continue
+        if ev["id"] == 0x81:
+            res = a.get(0, 0)
+            nm = b"".join(a.get(k, 0).to_bytes(4, "big") for k in (1, 2)).split(b"\0", 1)[0].decode("latin-1")
+            print("%s INVITE-STUB sceNpBasicGetFriendPresenceByIndex(0) -> %s%s  nazwa znajomego='%s'" % (
+                head, "OK" if res == 0 else "BLAD 0x%08X" % res, "" if res == 0 else " (brak znajomego/RPCN?)", nm))
             continue
         if ev["id"] == 0x70:
             code = a.get(2, 0)

@@ -6,8 +6,8 @@
 
 Argument to folder z rpcs3.exe (tam jest podfolder patches\\patch.yml). Tworzy kopie patch.yml.bak.
 Po dopisaniu: RPCS3 -> Manage -> Patch Manager -> FIFA 17 -> BLES02233 -> zaznacz
-"FIFA trace (zaproszenia i zdarzenia UI)" (oraz, jesli chcesz sprobowac eksperymentu, "FIFA eksperyment - wymus
-OnOnlineCreateSession po createGame") i uruchom gre od nowa. Pierwsze uruchomienie kompiluje PPU (kilka minut).
+"FIFA trace (zaproszenia i zdarzenia UI)" (oraz, jesli chcesz sprobowac eksperymentu, "FIFA eksperyment - wyslij
+zaproszenie do znajomego po createGame") i uruchom gre od nowa. Pierwsze uruchomienie kompiluje PPU (kilka minut).
 Opcja --no-experiment pomija wpis eksperymentu (zostaje sam znacznik).
 """
 from __future__ import annotations
@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "rpcs3_patch_trace_invites.yml")
 KEY = "PPU-1243af2b292938038cdc3696755e82477122db3b"
 NAME = "FIFA trace (zaproszenia i zdarzenia UI):"
+OLD_PREFIXES = ("FIFA trace", "FIFA eksperyment")           # takze wpisy z wczesniejszych rund (inna nazwa eksperymentu)
 
 
 def is_entry_header(body: str) -> bool:
@@ -57,7 +58,7 @@ def strip_entry(lines: list[str]) -> list[str]:
     out, skipping = [], False
     for ln in lines:
         body = ln.rstrip("\r\n")
-        if is_entry_header(body) and body.strip() in names:
+        if is_entry_header(body) and (body.strip() in names or body.strip().startswith(OLD_PREFIXES)):
             skipping = True
             continue
         if skipping:
