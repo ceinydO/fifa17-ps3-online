@@ -1,24 +1,33 @@
 # Plan testu (nastepna sesja)
 
-## TEST RUNDA 4 (2026-10-12) -- zrob to najpierw
-Wynik rundy 3 (README, "Latest session: 2026-10-12 (round 3 results)"): `createGame` dziala, UI dostaje
-`OnOnlineCreateSession`, ale skrypt UI **nigdy nie wola natywnego `SendGameInvite`** -- wiec zaproszenie nie jest wysylane.
-Dodatkowo polaczenie RPCN w RPCS3 padalo ("connection reset by server") po ~4-6 min od startu gry i nie wracalo.
-Ta runda: wpis eksperymentu sam wola `SendGameInvite` po kazdym udanym `createGame` (dla pierwszego znajomego RPCN).
-1. **Oba komputery:** podmien `patches\patch.yml` (folder z `rpcs3.exe`, podfolder `patches`) plikiem od Claude'a
-   (ten sam dla obu; stary zachowaj jako `.bak`). W RPCS3: Patch Manager -> FIFA 17 -> BLES02233 -> **zaznacz wszystkie 5 wpisow**
-   (w tym "FIFA trace" i "FIFA eksperyment - wyslij zaproszenie do znajomego po createGame"). Pierwszy start kompiluje PPU (kilka minut).
-2. **WAZNE - czas:** RPCN laczy sie przy starcie gry i po ~4-6 min sie rozlacza. Odpal gre na obu, **od razu** idz Online ->
-   Online Friendlies (maks. 2-3 min od startu gry), kolega tez. Serwer (`update_and_run.ps1`) wlaczony wczesniej.
-   Jesli w ktoryms RPCS3.log pojawi sie `rpcn: Disconnected` PRZED zaproszeniem -- test jest niewazny, zamknij gre i zacznij od nowa.
-3. Host: wybierz kolegi i PLAY MATCH (jak dotad). Jesli RPCS3 pokaze okno/nakladke **wysylania wiadomosci/zaproszenia** --
-   zatwierdz je (Enter/X), nie zamykaj. Kolega: wypatruj powiadomienia RPCS3 u gory ekranu (~6 s, "zaproszenie od ...")
-   i okna FIFA z zaproszeniem. Zapisz jednym zdaniem, co widac na ekranie hosta i kolegi.
-4. Ponow zaproszenie max 2 razy (co ~20 s). Zamknij gre normalnie, **skopiuj `RPCS3.log` zaraz po tescie** (obaj),
-   host: `collect_logs.ps1`. Wyslij zip + oba logi.
-Odczyt: `python tools/decode_trace.py RPCS3.log --elf EBOOT.ELF`: `INVITE-STUB ...` (wynik i nazwa znajomego), potem
-`0x10 adaptor SendGameInvite`, `0x12`-`0x16` (lancuch), `NP ...sceNpBasicSendMessageGui` (w RPCS3.log), a u kolegi `0x30` z r3=5/23
-(zaproszenie przyszlo), `UI-SKRYPT GameInviteValidation/GameInviteJoin`.
+## TEST RUNDA 5 (2026-10-12) -- zrob to najpierw
+Wynik rundy 4 (README, "Latest session: 2026-10-12 (round 4 results)"): natywny lancuch zaproszenia **dziala w prawdziwym RPCS3**
+i dochodzi do `sceNpBasicSendMessageGui`, ale RPCS3 odrzucil wiadomosc (`EXCEEDS_MAX`: temat mial 25 znakow, limit to 18) --
+wiec w obu kierunkach nie wyszlo zadne zaproszenie. Runda 5: temat poprawiony + **odbior po stronie kolegi** (gra sama nie otwiera
+listy zaproszen, bo w RPCS3 nie ma XMB) + wiecej znacznikow na sciezce przyjecia zaproszenia i `joinGame`.
+1. **Oba komputery:** podmien `patches\patch.yml` (folder z `rpcs3.exe`, podfolder `patches`) plikiem od Claude'a (ten sam dla
+   obu; stary zachowaj jako `.bak`). W RPCS3: Patch Manager -> FIFA 17 -> BLES02233 -> **zaznacz wszystkie 5 wpisow**
+   (w tym "FIFA trace" i **"FIFA eksperyment - zaproszenia (wyslij po createGame, odbierz liste zaproszen)"**). Pierwszy start
+   po zmianie kompiluje PPU (kilka minut). Serwer (`update_and_run.ps1`) wlaczony wczesniej.
+2. **WAZNE - czas:** polaczenie RPCN pada ok. 3,5 min po logowaniu (start gry). Odpal gre na obu, **od razu** idz Online ->
+   Online Friendlies i **zatrzymaj sie na ekranie ustawien** (kolega tez). Na tym ekranie czekajcie, az host bedzie gotowy.
+   Jesli w ktoryms `RPCS3.log` pojawi sie `rpcn: Disconnected` PRZED zaproszeniem -- test niewazny, zacznijcie od nowa.
+3. **Host:** PLAY MATCH. Po chwili gra zamarznie na moment i RPCS3 pokaze nakladke **wyboru znajomego** (lista online znajomych,
+   np. `odyniec1`): **X (Cross)** na padzie = wybierz, potem okno **Yes/No** z tematem "FIFA 17 mecz" -> **Yes**.
+   (Circle = anuluj. Jesli lista jest pusta -- RPCN hosta albo kolegi juz padl, test niewazny.)
+4. **Kolega:** u gory pojawi sie powiadomienie RPCS3 o zaproszeniu (~6 s) **i od razu nakladka z lista zaproszen** (od hosta,
+   temat "FIFA 17 mecz"): **X (Cross)** = przyjmij (Triangle = odrzuc, Circle = zamknij). Potem patrzcie, co robi gra
+   (ekran FIFA z zaproszeniem / wchodzenie do lobby / blad). Zapiszcie jednym zdaniem, co widac na ekranie hosta i kolegi.
+5. Jesli nie wyszlo, host moze powtorzyc PLAY MATCH (max 2 razy). Zamknij gre normalnie, **skopiuj `RPCS3.log` zaraz po tescie**
+   (obaj), host: `collect_logs.ps1`. Wyslij zip + oba logi + to jedno zdanie o ekranach.
+Odczyt: `python tools/decode_trace.py RPCS3.log --elf EBOOT.ELF`. Host: `INVITE-STUB ... OK`, `0x10`..`0x16`, w `RPCS3.log`
+`sceNpBasicSendMessageGui` BEZ bledu `failed with`, potem `0x77` (USER_INVITE sukces). Kolega: `0x30` z r3=23, `RECV-STUB
+zdarzenie NP 23`, `RECV-STUB ... -> 0x00000000`, `0x30` r3=14, `0x80`, `0x83`, `0x84`/`0x87`, `0x63`/`0x88`/`0x89`, `UI-SKRYPT
+GameInviteValidation/GameInviteJoin`, `0x7E`/`0x7F` + `OSDK GBRS/JOIN`; na serwerze `joinGame od 'odyniec1' GID=...`.
+
+## TEST RUNDA 4 (2026-10-12) -- wykonany: lancuch dziala, RPCS3 odrzucil temat (25 > 18 znakow)
+Patrz README. Zostawione dla procedury: podmiana `patch.yml` na obu PCs, start gry i Online Friendlies w ciagu 2-3 min,
+`RPCS3.log` skopiowany zaraz po tescie, host `collect_logs.ps1`.
 
 ## TEST Z ZNACZNIKAMI (2026-10-11 wieczor) -- wykonany (runda 1-2), zostaje jako opis procedury
 Cel: dowiedziec sie, w ktorym miejscu FIFA zatrzymuje wysylanie zaproszenia (README, "Latest session: 2026-10-11 wieczor").

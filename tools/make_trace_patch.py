@@ -54,23 +54,18 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rpcs3_patch_trac
 TARGETS = [
     (0x01, "EVT  post_event(this, nazwa_zdarzenia, dane)", 0x015FFB68, 0x01955538, 6),
     (0x10, "adaptor SendGameInvite (UI -> C++)", 0x016491B4, 0x01955530, 3),
-    (0x11, "adaptor SendMultipleGameInvites (UI -> C++)", 0x01649264, 0x01955524, 3),
     (0x12, "ginv::SendGameInvite", 0x00301AD4, 0x01955528, 3),
     (0x13, "Invitations op ctor (SendGameInvite)", 0x003019A4, 0x0195552C, 3),
     (0x14, "puid: LookupPlatformUserId start", 0x002CD938, 0x01955530, 3),
     (0x15, "puid: wynik wyszukiwania (30262c)", 0x0030262C, 0x0195552C, 3),
     (0x16, "NP: ostatni krok przed sceNpBasicSendMessageGui (302454)", 0x00302454, 0x01955538, 3),
-    (0x17, "ginv: rejestracja modulu zaproszen (302184)", 0x00302184, 0x01955538, 3),
-    (0x18, "SendPartyGameInvites", 0x00301C88, 0x01955538, 3),
     (0x20, "createGame: callback sukcesu 'GSMR' (2dee08)", 0x002DEE08, 0x0195552C, 3),
     (0x30, "NP: handler zdarzen basic (zaproszenia/wiadomosci)", 0x00AE0C04, 0x01955534, 3),
     (0x31, "NP: callback managera", 0x00ADF1DC, 0x01955538, 3),
     (0x40, "SportsWorld: ConnectToSportsWorld", 0x00309388, 0x01955538, 3),
     (0x41, "SportsWorld: LoadSportsWorldUserPresence", 0x0030F2F0, 0x01955534, 3),
-    (0x42, "SportsWorld: SendFriendsToSportsWorld", 0x0030F068, 0x0195553C, 3),
     (0x43, "SportsWorld: LoadSportsWorldUsers", 0x00311FDC, 0x01955538, 3),
-    (0x44, "SportsWorld: SendMatchupStatsToSportsWorld", 0x0030E498, 0x0195551C, 3),
-    # --- runda 2 (znaczniki 0x53, 0x56-0x5A usuniete w rundzie 4: potwierdzone, ze ta sciezka nie jest uzywana) ---
+    # --- runda 2 (znaczniki 0x53, 0x56-0x5A, 0x5F, 0x60, 0x62 usuniete: potwierdzone, ze ta sciezka nie jest uzywana) ---
     (0x50, "OSDK trace(kategoria 4cc, zdarzenie 4cc)", 0x002E8448, 0x01955538, 3),
     (0x51, "GameSessionManager::createGame(parametry, listener)", 0x0028EFA4, 0x01955510, 3),
     (0x52, "CreateGame op: konstruktor", 0x0028E208, 0x01955518, 3),
@@ -80,10 +75,7 @@ TARGETS = [
     (0x5C, "Blaze: onNetworkCreated (c6a4e0)", 0x00C6A4E0, 0x01955530, 3),
     (0x5D, "Blaze: wysylka finalizeGameCreation (c6a204)", 0x00C6A204, 0x0195553C, 3),
     (0x5E, "Blaze: odpowiedz na finalizeGameCreation (c6bf74)", 0x00C6BF74, 0x0195553C, 3),
-    (0x5F, "FSM poczekalni: start (4d087c)", 0x004D087C, 0x01955538, 3),
-    (0x60, "FSM poczekalni: przerwanie/timeout (4cf708)", 0x004CF708, 0x01955538, 3),
     (0x61, "FSM poczekalni: konsument zdarzen (4d0aa4)", 0x004D0AA4, 0x01955514, 3),
-    (0x62, "FSM poczekalni: 4cf59c", 0x004CF59C, 0x01955530, 3),
     (0x63, "FifaOnline::StartInviteFlowPrep (4cf1f8)", 0x004CF1F8, 0x01955538, 3),
     (0x64, "GameInviteScreenAbort (4cf2f8)", 0x004CF2F8, 0x0195553C, 3),
     # --- runda 3: kto wola createGame i jaki listener dostaje wynik; wywolania silnik -> skrypty UI ---
@@ -96,8 +88,17 @@ TARGETS = [
     (0x77, "listener zaproszen: USER_INVITE sukces (16495b4)", 0x016495B4, 0x01955540, 3),
     (0x78, "listener zaproszen: USER_INVITE porazka (164964c)", 0x0164964C, 0x01955540, 3),
     (0x79, "EVENT_MATCHUP_SUCCESS: nadawca zdarzenia (1625504)", 0x01625504, 0x0195553C, 3),
-    (0x7E, "GameSessionManager JoinGame? (290b18)", 0x00290B18, 0x0195552C, 3),
-    (0x7F, "GameSessionManager JoinGame? (290dd8)", 0x00290DD8, 0x0195552C, 3),
+    (0x7E, "GameSessionManager::joinGame (290b18)", 0x00290B18, 0x0195552C, 3),
+    (0x7F, "GameSessionManager::joinGame, wariant (290dd8)", 0x00290DD8, 0x0195552C, 3),
+    # --- runda 5: odbior zaproszenia po stronie kolegi (zdarzenie NP 14 -> dane zaproszenia -> InviteHandler -> joinGame) ---
+    (0x80, "NP: zdarzenie 14 'zaproszenie wybrane' (r4=zdarzenie) (2f941c)", 0x002F941C, 0x01955540, 3),
+    (0x83, "NP: odczyt danych wybranego zaproszenia (r4=id) (2f3b50)", 0x002F3B50, 0x01955544, 3),
+    (0x84, "FifaOnline::InviteAccepted -- zdarzenie online (4de29c)", 0x004DE29C, 0x0195553C, 3),
+    (0x85, "UI: GameInviteValidation (4cf0ac)", 0x004CF0AC, 0x01955534, 3),
+    (0x86, "UI: GameInviteJoin (4ce70c)", 0x004CE70C, 0x0195552C, 3),
+    (0x87, "InviteHandler: obsluga InviteAccepted (r4=wsk. na 12 B danych zaproszenia) (4f19d4)", 0x004F19D4, 0x0195553C, 3),
+    (0x88, "FifaOnline::NotifyInvitationStatus -- zdarzenie online (6185e8)", 0x006185E8, 0x01955540, 3),
+    (0x89, "FifaOnline::InviteFlowPrepComplete -- zdarzenie online (6184c4)", 0x006184C4, 0x01955540, 3),
 ]
 
 # Znaczniki w srodku funkcji: (id, nazwa, adres instrukcji A, jej slowo, tryb).  Podmieniana instrukcja musi byc
@@ -109,21 +110,43 @@ MIDS = [
 
 
 # ---------------------------------------------------------------- mini asembler (tylko uzywane instrukcje)
-# ---------------------------------------------------------------- EKSPERYMENT: wyslij zaproszenie natywnie po createGame
+# ---------------------------------------------------------------- EKSPERYMENT: zaproszenie natywne (wysylanie + odbior)
 # Wynik rundy 3: skrypt UI NIGDY nie wola natywnego SendGameInvite (adaptor 0x16491b4) -- ani razu w 11 probach createGame.
-# Ten wpis robi to za skrypt: po udanym createGame bierze pierwszego znajomego RPCN (sceNpBasicGetFriendPresenceByIndex)
-# i wola adaptor tak, jak zrobilby UI: SendGameInvite(this, nazwa_PSN_znajomego, tekst, 0, 0, 0). Dalej dziala juz
-# oryginalny kod gry: puid (sceNpLookupNpId) -> 0x30262c -> 0x302454 -> sceNpBasicSendMessageGui.
-EXP_NAME = "FIFA eksperyment - wyslij zaproszenie do znajomego po createGame"
+# Runda 4 (log): ten wpis zrobil to za skrypt i caly lancuch (adaptor -> puid -> 0x302454) doszedl do
+# sceNpBasicSendMessageGui, ale RPCS3 odrzucil wysylke: SCE_NP_BASIC_ERROR_EXCEEDS_MAX -- temat mial 25 znakow, a limit
+# SCE_NP_BASIC_SUBJECT_CHARACTER_MAX to 18 (tekst: max 512). Runda 5: temat <= 18 znakow (pilnuje tego assert + selftest).
+#
+# Wpis ma dwa haki:
+#  (1) NADAWCA (host, po udanym createGame): bierze pierwszego znajomego RPCN (sceNpBasicGetFriendPresenceByIndex) i wola
+#      adaptor tak, jak zrobilby UI: SendGameInvite(this, nazwa_PSN_znajomego, tekst, 0, 0, temat). Dalej dziala oryginalny
+#      kod gry: puid (sceNpLookupNpId) -> 0x30262c -> 0x302454 -> sceNpBasicSendMessageGui; RPCS3 pokazuje nakladke
+#      "wybierz znajomego" + potwierdzenie (Tak/Nie).
+#  (2) ODBIORCA (kolega): w petli zdarzen NP gry (0xae01a4, po udanym sceNpBasicGetEvent), gdy przyjdzie zdarzenie 5
+#      (INCOMING_INVITATION) lub 23 (INCOMING_BOOTABLE_INVITATION), wola sceNpBasicRecvMessageCustom(INVITE, INCLUDE_BOOTABLE)
+#      -- dokladnie to samo, co gra robi sama (0x2f8c8c) po wybraniu "zaproszenia" w XMB. RPCS3 pokazuje liste zaproszen;
+#      po zatwierdzeniu (X) dostaje zdarzenie 14 i dalej dziala oryginalny kod gry: 0x2f941c -> odczyt danych zaproszenia
+#      (id sesji) -> InviteHandler -> joinGame na serwerze. Bez tego haka nic na stronie kolegi nie otwiera listy zaproszen
+#      (gra reaguje tylko na zdarzenie 14 i na zdarzenie systemowe 0x151, ktorego RPCS3 nie generuje).
+EXP_NAME = "FIFA eksperyment - zaproszenia (wyslij po createGame, odbierz liste zaproszen)"
 EXP_AT = 0x002DEF7C                  # `li r3,4` tuz po wywolaniu listenera w callbacku createGame (2dee08)
 EXP_DISPLACED = 0x38600004
 EXP_FN_GET_FRIEND = 0x01EA1718       # import sceNpBasicGetFriendPresenceByIndex(index, SceNpUserInfo*, pres*, options)
 EXP_FN_SEND_INVITE = 0x016491B4      # adaptor SendGameInvite(this, const char* nazwa, const char* tekst, lista, lista, ctx)
 EXP_GLOBAL_HI, EXP_GLOBAL_LO = 0x257, -0x5C90   # *(0x256A370) = obiekt zewnetrzny; adaptor = obiekt + 8 (fabryka 0x164aa54)
-EXP_TEXT = "FIFA 17 - zapraszam na mecz (Online Friendlies)"       # tresc (body) zaproszenia
-EXP_SUBJECT = "FIFA 17 Online Friendlies"                           # temat; MUSI byc niepusty (FIFA wysyla cechy 6 = ASSUME_SEND,
-                                                                    # a RPCS3 wtedy odrzuca pusty temat jako INVALID_ARGUMENT)
+EXP_TEXT = "FIFA 17 - zapraszam na mecz (Online Friendlies)"       # tresc (body) zaproszenia (limit RPCS3: 512 znakow)
+EXP_SUBJECT = "FIFA 17 mecz"         # temat: niepusty (FIFA wysyla cechy 6 = ASSUME_SEND, RPCS3 wtedy odrzuca pusty temat)
+                                     # i NAJWYZEJ 18 znakow (SCE_NP_BASIC_SUBJECT_CHARACTER_MAX) -- patrz runda 4
+EXP_SUBJECT_MAX, EXP_TEXT_MAX = 18, 512
+assert 0 < len(EXP_SUBJECT) <= EXP_SUBJECT_MAX and 0 < len(EXP_TEXT) <= EXP_TEXT_MAX
 EXP_LOG_ID = 0x81                    # znacznik: k=0 wynik GetFriendPresenceByIndex, k=1/2 pierwsze 8 znakow nazwy, k=3 adaptor
+
+RCV_AT = 0x00AE0208                  # `lwz r3,0x560(r1)` w 0xae01a4 -- wykonywane tylko po udanym sceNpBasicGetEvent
+RCV_DISPLACED = 0x80610560           # lwz r3,0x560(r1)
+RCV_FN_RECV = 0x01EA1A60             # import sceNpBasicRecvMessageCustom(mainType, options, container)
+RCV_EVENT_OFF = 0x560                # zdarzenie NP zapisane przez GetEvent w ramce 0xae01a4 (r1+0x560)
+RCV_EVENTS = (5, 23)                 # INCOMING_INVITATION, INCOMING_BOOTABLE_INVITATION
+RCV_MAIN_TYPE, RCV_OPTIONS = 3, 2    # SCE_NP_BASIC_MESSAGE_MAIN_TYPE_INVITE, OPTIONS_INCLUDE_BOOTABLE (jak natywne 0x2f8c8c)
+RCV_LOG_ID = 0x82                    # znacznik: k=0 zdarzenie, k=1 wynik sceNpBasicRecvMessageCustom (0 = wybrano zaproszenie)
 
 
 def _ds(op, rs, ra, d, xo):
@@ -174,6 +197,7 @@ def _bc(src, dst, bo, bi):
 
 def _bc_lt(src, dst): return _bc(src, dst, 12, 0)       # blt cr0
 def _bc_eq(src, dst): return _bc(src, dst, 12, 2)       # beq cr0
+def _bc_ne(src, dst): return _bc(src, dst, 4, 2)        # bne cr0
 
 
 def branch(src, dst, link):
@@ -322,13 +346,68 @@ def _exp_str(txt):
     return b + b"\0" * (-len(b) % 4)
 
 
+RCV_FRAME = 0x50
+RCV_OFF_RTC = 0x30
+
+
+def build_rcv_stub(base):
+    """Odbior zaproszenia (kolega). Wejscie przez `bl` z RCV_AT (LR = RCV_AT+4).
+
+    Dowod, ze wystarczy zachowac LR (sprawdzone na dezasemblacji 0xae01a4 od RCV_AT): w miejscu RCV_AT zadne rejestry
+    zmienne nie sa zywe -- r3 zaraz nadpisuje podmieniona instrukcja, r4-r6 sa ustawiane (`li`) przed pierwszym uzyciem,
+    r7-r12 sa czytane dopiero po `ld`/`li` w tym samym bloku, r0 jest czytany dopiero w epilogu po `ld`, cr0 ustawia
+    nastepne `cmpwi`. r14-r31 i cr2-4 zachowuja wolane funkcje (ABI). Selftest sprawdza r1, r2, r14-r31, cr2-4 i r3.
+
+    Dla zdarzenia 5 / 23 wola sceNpBasicRecvMessageCustom(3, 2, -1) i loguje (znacznik RCV_LOG_ID). Na koncu wykonuje
+    podmieniona instrukcje (`lwz r3,0x560(r1)` na oryginalnym r1)."""
+    c = []
+    e = c.append
+    calls = []
+
+    def bl(target):
+        calls.append((len(c), target))
+        e(0)
+
+    def log(k, load):
+        e(load)
+        e(lis(4, 0xFA00 | RCV_LOG_ID)); e(ori(4, 4, k)); e(clrldi(4, 4, 32)); e(sldi(4, 4, 32)); e(or_(4, 4, 5))
+        e(addi(3, 1, RCV_OFF_RTC))
+        bl(RTC_STUB)
+
+    e(stdu(1, -RCV_FRAME, 1))
+    e(mflr(0)); e(std(0, RCV_FRAME + 0x10, 1))
+    ev_off = RCV_FRAME + RCV_EVENT_OFF                    # zdarzenie lezy w ramce funkcji wolajacej (r1 sprzed stuba)
+    e(lwz(5, ev_off, 1))
+    e(cmpwi(5, RCV_EVENTS[1])); idx_do = len(c); e(0)     # beq do
+    e(cmpwi(5, RCV_EVENTS[0])); idx_skip = len(c); e(0)   # bne skip
+    idx_dopos = len(c)
+    log(0, lwz(5, ev_off, 1))                             # zdarzenie
+    e(li(3, RCV_MAIN_TYPE)); e(li(4, RCV_OPTIONS)); e(li(5, -1))
+    bl(RCV_FN_RECV)
+    log(1, or_(5, 3, 3))                                  # wynik
+    idx_end = len(c)
+    e(ld(0, RCV_FRAME + 0x10, 1)); e(mtlr(0))
+    e(addi(1, 1, RCV_FRAME))
+    e(RCV_DISPLACED); e(BLR)
+    for idx, target in calls:
+        c[idx] = branch(base + 4 * idx, target, True)
+    c[idx_do] = _bc_eq(base + 4 * idx_do, base + 4 * idx_dopos)
+    c[idx_skip] = _bc_ne(base + 4 * idx_skip, base + 4 * idx_end)
+    return c
+
+
 def build_exp():
-    """-> (slowa (adres, slowo), (adres_podmiany, slowo_bl, stub))"""
+    """-> (slowa (adres, slowo), [(adres_podmiany, slowo_bl, stub), ...]) -- najpierw stub odbiorcy (RCV_AT), potem nadawcy
+    (EXP_AT); teksty zaproszenia stoja na samym koncu (ostatnie slowa nie sa instrukcjami)."""
     words, hooks, (commons, end) = build_all()
-    base = (end + 15) & ~15
+    rbase = (end + 15) & ~15
+    rw = build_rcv_stub(rbase)
+    base = (rbase + 4 * len(rw) + 15) & ~15
     sw = build_exp_stub(base)
     assert base + 4 * len(sw) <= CAVE_END, hex(base + 4 * len(sw))
-    return [(base + 4 * i, w) for i, w in enumerate(sw)], (EXP_AT, branch(EXP_AT, base, True), base)
+    out = [(rbase + 4 * i, w) for i, w in enumerate(rw)] + [(base + 4 * i, w) for i, w in enumerate(sw)]
+    # wypelnienie do wyrownania miedzy stubami (zera sa juz w oryginale -- nie wpisujemy)
+    return out, [(RCV_AT, branch(RCV_AT, rbase, True), rbase), (EXP_AT, branch(EXP_AT, base, True), base)]
 
 
 def build_all():
@@ -393,17 +472,20 @@ def render_yaml():
     w("          # --- kod w jaskini 0x%08X..0x%08X ---" % (CAVE, end))
     for a, wd in words:
         w("          - [ be32, 0x%08X, 0x%08X ]" % (a, wd))
-    exp_words, (exp_at, exp_bl, exp_stub) = build_exp()
+    exp_words, exp_hooks = build_exp()
     w("")
     w("  %s:" % EXP_NAME)
     w("    Games:")
     w("      FIFA 17:")
     w('        BLES02233: [ "01.00" ]')
     w('    Author: "custom"')
-    w('    Notes: "Po udanym createGame wola natywnie SendGameInvite (adaptor 16491b4) dla pierwszego znajomego RPCN -- to, czego nie robi skrypt UI"')
-    w('    Patch Version: "1.0"')
+    w('    Notes: "Nadawca: po udanym createGame wola natywnie SendGameInvite (adaptor 16491b4) dla pierwszego znajomego RPCN. '
+      'Odbiorca: po zdarzeniu NP 5/23 otwiera liste zaproszen (sceNpBasicRecvMessageCustom) -- to, czego nie robi skrypt UI"')
+    w('    Patch Version: "2.0"')
     w("    Patch:")
-    w("          - [ be32, 0x%08X, 0x%08X ]   # 2def7c: li r3,4 -> bl stub 0x%08X" % (exp_at, exp_bl, exp_stub))
+    for (at, bl_word, stub), what in zip(exp_hooks, ("0xae0208: lwz r3,0x560(r1) (odbior zaproszenia)",
+                                                       "2def7c: li r3,4 (wysylanie zaproszenia po createGame)")):
+        w("          - [ be32, 0x%08X, 0x%08X ]   # %s -> bl stub 0x%08X" % (at, bl_word, what, stub))
     for a, wd in exp_words:
         w("          - [ be32, 0x%08X, 0x%08X ]" % (a, wd))
     return "\n".join(out) + "\n"
@@ -493,10 +575,10 @@ class Emu:
             b = self.s16(imm)
             nib = 8 if a < b else (4 if a > b else 2)
             self.cr = (self.cr & 0x0FFFFFFF) | (nib << 28)
-        elif op == 16:                                       # bc (tylko BO=12: skocz, gdy bit CR ustawiony)
+        elif op == 16:                                       # bc (BO=12: skocz, gdy bit CR ustawiony; BO=4: gdy wyczyszczony)
             bo, bi = rd, ra
-            assert bo == 12 and not (w & 3), hex(w)
-            if (self.cr >> (31 - bi)) & 1:
+            assert bo in (12, 4) and not (w & 3), hex(w)
+            if bool((self.cr >> (31 - bi)) & 1) == (bo == 12):
                 off = self.s16(imm & 0xFFFC)
                 self.pc = (self.pc + off) & M
                 return
@@ -629,7 +711,8 @@ def _yaml_check():
 def _exp_selftest():
     """Eksperyment (natywne SendGameInvite): argumenty adaptora, logi, przypadki bledow, rejestry nieulotne (r14-r31, cr2-4)."""
     rng = random.Random(77)
-    exp_words, (at, bl, stub) = build_exp()
+    exp_words, hk = build_exp()
+    at, bl, stub = hk[1]                      # hak nadawcy (EXP_AT)
     ok_all = True
     glob = (EXP_GLOBAL_HI << 16) + EXP_GLOBAL_LO
     for scenario in ("ok", "brak_znajomego", "brak_adaptora"):
@@ -716,11 +799,68 @@ def _exp_selftest():
     return ok_all
 
 
+def _rcv_selftest():
+    """Odbior zaproszenia: dla zdarzen 5 i 23 wola sceNpBasicRecvMessageCustom(3, 2, -1); dla innych nie; zawsze zachowuje
+    rejestry i wykonuje podmieniona instrukcje (r3 = zdarzenie z r1+0x560 oryginalnej ramki)."""
+    rng = random.Random(99)
+    exp_words, hk = build_exp()
+    at, bl_word, stub = hk[0]
+    ok_all = True
+    for event in (23, 5, 1, 0, 9, 2, 14, 10, 4, 22, 24, 0xFFFFFFFF):
+        for recv_result in ((0,) if event in RCV_EVENTS else (0,)):
+            e = _fresh_emu(exp_words, rng)
+            e.w(at, struct.pack(">I", bl_word))
+            calls, logged = [], []
+            frame_r1 = 0xD0010000 - 0x200
+
+            def recv(emu):
+                calls.append([emu.r[3] & 0xFFFFFFFF, emu.r[4] & 0xFFFFFFFF, emu.r[5] & 0xFFFFFFFF])
+                for n in list(range(4, 13)) + [0]:
+                    emu.r[n] = rng.getrandbits(64)
+                emu.r[3] = recv_result
+                emu.pc = emu.lr
+            e.hooks[RCV_FN_RECV] = recv
+            e.hooks[RTC_STUB] = _make_rtc(logged, rng)
+            e.w(frame_r1 + RCV_EVENT_OFF, struct.pack(">I", event))
+            for n in list(range(14, 32)):
+                e.r[n] = rng.getrandbits(64)
+            e.r[0] = rng.getrandbits(64)
+            before = (list(e.r), list(e.f), e.cr, e.ctr)
+            e.lr = at + 4                                   # skutek `bl stub` z RCV_AT (LR przed bl jest martwy)
+            e.pc = stub
+            e.hooks[at + 4] = lambda emu: (_ for _ in ()).throw(StopIteration)
+            try:
+                e.run(at + 4)
+            except StopIteration:
+                pass
+            problems = []
+            want_call = event in RCV_EVENTS
+            if want_call:
+                if calls != [[RCV_MAIN_TYPE, RCV_OPTIONS, 0xFFFFFFFF]]: problems.append("wywolanie %s" % calls)
+                want_log = [((0xFA000000 | (RCV_LOG_ID << 16) | 0) << 32) | event,
+                            ((0xFA000000 | (RCV_LOG_ID << 16) | 1) << 32) | recv_result]
+            else:
+                if calls: problems.append("niepotrzebne wywolanie %s" % calls)
+                want_log = []
+            if logged != want_log: problems.append("log %s" % [hex(x) for x in logged])
+            if e.pc != at + 4: problems.append("pc=%x" % e.pc)
+            if e.r[3] != event: problems.append("r3 (podmieniona instrukcja)=%x" % e.r[3])
+            if e.r[1] != before[0][1]: problems.append("r1")
+            for n in list(range(14, 32)) + [2]:
+                if e.r[n] != before[0][n]: problems.append("r%d" % n)
+            if (e.cr & 0x00FFF000) != (before[2] & 0x00FFF000): problems.append("cr2-4")
+            print("%-4s odbior zaproszenia (zdarzenie %d): %s (stub 0x%08X) %s" % (
+                "OK" if not problems else "BLAD", event if event < 0x100 else -1,
+                "otwiera liste" if want_call else "pomija", stub, ",".join(problems)))
+            ok_all = ok_all and not problems
+    return ok_all
+
+
 def selftest():
     words, hooks, (commons, end) = build_all()
-    exp_words, (exp_at, exp_bl, _stub) = build_exp()
+    exp_words, exp_hooks = build_exp()
     n_text = (len(_exp_str(EXP_TEXT)) + len(_exp_str(EXP_SUBJECT))) // 4      # ostatnie slowa stuba to teksty, nie instrukcje
-    ok = _capstone_check(words + [(a, w) for a, w, *_ in hooks] + exp_words[:-n_text] + [(exp_at, exp_bl)])
+    ok = _capstone_check(words + [(a, w) for a, w, *_ in hooks] + exp_words[:-n_text] + [(a_, b_) for a_, b_, _s in exp_hooks])
     rng = random.Random(1234)
     for mid, name, target, helper, mode in TARGETS:
         logged = []
@@ -799,6 +939,7 @@ def selftest():
                                               ",".join(problems)))
         ok = ok and not problems
     ok = _exp_selftest() and ok
+    ok = _rcv_selftest() and ok
     ok = _yaml_check() and ok
     exp_end = exp_words[-1][0] + 4
     print("jaskinia: 0x%08X..0x%08X (%d bajtow, limit %d)" % (CAVE, exp_end, exp_end - CAVE, CAVE_END - CAVE))
@@ -837,9 +978,10 @@ def verify_elf(path):
         if u32(at) != displaced:
             bad += 1
             print("NIEZGODNE 0x%02X %s 0x%08X: jest %08X, oczekiwano %08X" % (mid, name, at, u32(at), displaced))
-    if u32(EXP_AT) != EXP_DISPLACED:
-        bad += 1
-        print("NIEZGODNE eksperyment 0x%08X: jest %08X, oczekiwano %08X" % (EXP_AT, u32(EXP_AT), EXP_DISPLACED))
+    for at_, want_ in ((EXP_AT, EXP_DISPLACED), (RCV_AT, RCV_DISPLACED)):
+        if u32(at_) != want_:
+            bad += 1
+            print("NIEZGODNE eksperyment 0x%08X: jest %08X, oczekiwano %08X" % (at_, u32(at_), want_))
     for a, w in build_all()[0] + build_exp()[0]:      # jaskinia musi byc pusta (zera) w oryginale
         if u32(a) != 0:
             bad += 1

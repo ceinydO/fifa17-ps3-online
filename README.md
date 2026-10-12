@@ -24,24 +24,89 @@ friend, the friend sees the invitation, accepts, both end up in the same Blaze g
 - Login, persona lookup, entitlements, messaging, stats and the whole host-side `createGame` handshake work
   (`createGame` -> `NotifyGameSetup` -> `updateMeshConnection` -> `finalizeGameCreation` all complete, no crash, on
   all five "host-only" setup levels, see below).
-- **The invitation is still never sent, and now we know why.** Round 3 of the trace patch (2026-10-12, both players
-  online) showed that the host's `createGame` *does* complete and the UI *does* get its
-  `OnOnlineCreateSession("EVENT_CREATEGAME_SUCCESS")` script callback (through the real UI adaptor family at
-  `0x1A54xxx`). But the UI script **never calls the native `SendGameInvite`** (adaptor `0x16491b4`, the only code that
-  can start `ginv` -> `sceNpBasicSendMessageGui`), not once in 11 attempts over two rounds. Without that call nothing
-  is sent, the friend sees nothing.
-- Next step (built, selftested, **not yet run in RPCS3**): round 4 patch = trace + an experiment entry that calls
-  `SendGameInvite` natively right after every successful `createGame`, for the first RPCN friend. See "Latest session:
-  2026-10-12 (round 3 results)" below and `TEST_PLAN.md`.
-- Operational finding: **the RPCN connection of RPCS3 drops ("connection reset by server") ~4-6 minutes after the game
-  boots** and is never re-established; the host's RPCN was already dead during the whole round-3 invite test. Do the
-  invite test within ~3 minutes of starting the game.
+- **Round 4 (2026-10-12) proved the native invitation chain runs in real RPCS3.** The UI script never calls
+  `SendGameInvite` (round 3), but the round-4 experiment stub does, and the whole chain (adaptor -> `ginv` ->
+  UserManager `puid` lookup -> `0x302454`) reached `sceNpBasicSendMessageGui` on both PCs. RPCS3 rejected it with
+  `SCE_NP_BASIC_ERROR_EXCEEDS_MAX`: **our subject had 25 characters, the limit is 18** (body: 512). Fixed in round 5.
+- **Round 5 (built and selftested, not yet run in RPCS3):** subject <= 18 chars (asserted), plus the missing
+  **receiving half**: the game only reacts to NP event 14 (`RECV_INVITATION_RESULT`) and the system event `0x151`, which
+  RPCS3 never produces by itself; the new stub opens RPCS3's invitation list (`sceNpBasicRecvMessageCustom`) when event 5/23
+  arrives, FIFA's own code then reads the 8-byte game id and joins. More trace markers on the accept path and `joinGame`.
+- Known blocker not addressed yet: after `createGame` the host UI goes `0x64 -> 0x63 -> 0x74 -> 0x65` within ~1.3 s while
+  the SportsWorld (EASW web service) ops fail because the server provides no `OSDK_EASW_*_URL` (the client even resolves
+  an empty host name). The SportsWorld friend list is probably what the real UI uses to pick the invitee, which would
+  explain why the UI script never sends the invitation.
+- Operational finding: **the RPCN connection of RPCS3 drops ("connection reset by server") ~3.5-6 minutes after login**
+  (round 4: 213 s and 216 s) and is never re-established. The RPCS3 "send invitation" list shows only *online* RPCN friends,
+  so do the whole test within ~3 minutes of starting the game.
 
 **Useful commands:** server `powershell -ExecutionPolicy Bypass -File .\update_and_run.ps1` (host only);
 logs for analysis `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` (zip) + `RPCS3.log` of both players;
 selftest `python -m fifa17srv selftest`.
 
-## Latest session: 2026-10-12 (round 3 results: the UI never asks for an invitation)
+## Latest session: 2026-10-12 (round 4 results: the chain runs, RPCS3 rejects our subject)
+
+**Test.** Round-4 patch (trace + experiment "send the invitation natively after createGame") on both PCs
+(`RPCS3 v0.0.42-20024` host, `-20034` friend); host pressed PLAY MATCH 5 times, then the friend 3 times; logs of both PCs + server.
+
+**Findings (decode: `python tools/decode_trace.py RPCS3.log --elf EBOOT.ELF`):**
+- **The experiment stub works on real RPCS3.** Each `createGame` success is followed by `INVITE-STUB
+  sceNpBasicGetFriendPresenceByIndex(0) -> OK name='odyniec1'` (resp. `'odyniec'` on the friend's PC), then the whole chain
+  `0x10 adaptor SendGameInvite` -> `0x12` -> `0x13` -> `0x14 puid` -> `0x15` (lookup result, ~0.2 s later) -> `0x16` -> RPCS3
+  `sceNpBasicSendMessageGui(msg, containerId=-1)` with `mainType 3 (INVITE), subType 1, msgFeatures 6, count 1` and our
+  subject/body (`RPCS3.log` prints both).
+- **Then it fails immediately:** `'sceNpBasicSendMessageGui' failed with 0x8002a66b : SCE_NP_BASIC_ERROR_EXCEEDS_MAX`.
+  Cause (RPCS3 source, `sceNpBasicSendMessageGui`): `length_subject > SCE_NP_BASIC_SUBJECT_CHARACTER_MAX (18)` ->
+  `EXCEEDS_MAX`; our subject "FIFA 17 Online Friendlies" had 25 characters (body limit 512). The op's failure path is the
+  listener `0x30237c` -> `0x78 USER_INVITE failure (164964c)` -> `EVENT_USER_INVITE_FAILURE` -> UI `ShowBusyIndicator` /
+  `HideBusyIndicator`. Identical on the host (5x) and on the friend (3x) - so **no invitation was ever sent in either
+  direction; "was the friend's invitation visible" = there was none to see**.
+- **Host UI after createGame** (unchanged by the invite): `0x64 -> 0x63` (+ `LoadSportsWorldUserPresence`,
+  `LoadSportsWorldUsers`, `ConnectToSportsWorld`) `-> 0x74 -> 0x65` within ~1.3 s, then ~19 s of `updateTimeCount` ticks (a
+  countdown on the settings screen), then a transition and the screen is ready for the next PLAY MATCH. The server game
+  (`GID` n, state PRE_GAME 130) stays alive until the next `createGame` or disconnect (the server answers a new
+  `createGame` with `NotifyGameRemoved` for the old one), so a friend could still join during that window.
+- **RPCN:** host logged in at game time 4:12, dropped at 7:48 (`recv failed: connection reset by server`, 215 s); friend 1:17 ->
+  4:50 (212 s). Both PCs were connected during all invite attempts (host's first attempt came 88 s after its login).
+  Reason for the reset unknown (server side RST; both ~3.5 min). The host's `event:0` from the friend at 7:43 is the friend's
+  RPCN going offline.
+- `DnsHook: DNS query for ` (empty name) appears 3 s after the redirector on both PCs: that is `ConnectToSportsWorld` with an
+  empty URL (`OSDK_EASW_*_URL` missing).
+
+**What happens on the receiving side (static analysis done this session with Ghidra):**
+- RPCS3, on a received INVITE message: a toast (6 s) and - if the communication id matches - the basic event
+  `INCOMING_(BOOTABLE_)INVITATION` (5 / 23). FIFA's NP event pump `0xae01a4` (FEThread; `sceNpBasicGetEvent` at `0xae01fc`)
+  treats 5/23 as an unknown event: **nothing opens the invitation list**. FIFA reacts only to (a) NP event 14
+  `RECV_INVITATION_RESULT` (handler `0x2f941c`) and (b) sysutil event `0x151` = `CELL_SYSUTIL_NP_INVITATION_SELECTED`
+  (in the sysutil pump `0x2f8e30`). Both end in `0x2f3b50` = `sceNpBasicRecvMessageAttachmentLoad(id 1, 8 bytes)` = the
+  game-session id from the invitation, stored at `user+0x20` (user object = `lgns` component, index 0), then virtual call
+  `+0xd4` -> `FifaOnline::InviteAccepted` (`0x4f19d4` stores the 12 bytes into the InviteHandler, state machine ->
+  `StartInviteFlowPrep`, `InviteFlowPrepComplete`, `NotifyInvitationStatus`, UI scripts `GameInviteValidation`,
+  `GameInviteJoin` -> `GameSessionManager::joinGame` `0x290b18` / `0x290dd8`).
+- RPCS3 never sends sysutil `0x151` (nobody calls its `np_handler::select_invitation`); event 14 is produced only when the
+  *game* calls `sceNpBasicRecvMessageCustom` (RPCS3 overlay list: Cross = accept, Triangle = deny, Circle = cancel; the game's
+  own wrapper `0x2f8c8c` calls it with `(INVITE, INCLUDE_BOOTABLE=2, -1)`; the list includes bootable invitations only
+  with that option). FIFA has no UI that reaches that wrapper on a PC without the XMB.
+- RPCS3's sender dialog (`sendmessage_dialog`) lists only **online RPCN friends** (Cross selects, then a Yes/No message box
+  with subject + body); it blocks the calling thread (FEThread) until the user decides.
+- The `ginv` module has a second, Blaze-based path for `SendGameInvite`, switched by the byte `0x25fbcd0`, which nothing
+  ever writes (always 0 = NP path). Dead code.
+
+**Round-5 patch (this commit).** `tools/make_trace_patch.py`: entry **"FIFA eksperyment - zaproszenia (wyslij po createGame,
+odbierz liste zaproszen)"** = two hooks: (1) sender: unchanged stub, subject now "FIFA 17 mecz" (assert <= 18 chars, body <= 512, checked
+by the selftest); (2) **receiver**: `lwz r3,0x560(r1)` at `0xae0208` (executes only after a successful `sceNpBasicGetEvent`,
+r1+0x560 = event code) -> `bl` to a 33-word stub that, for event 5 or 23, calls `sceNpBasicRecvMessageCustom(3, 2, -1)`
+(import `0x1EA1A60`) and logs marker `0x82` (event, result), then executes the displaced instruction. Register liveness at
+`0xae0208` was checked on the disassembly (only LR needs saving; the selftest verifies r1, r2, r14-r31, cr2-4, r3 = event).
+New trace markers: `0x80` (event-14 handler `2f941c`), `0x83` (`2f3b50` read of the invitation data), `0x84`/`0x87`/`0x88`/`0x89`
+(InviteAccepted / its handler / NotifyInvitationStatus / InviteFlowPrepComplete), `0x85`/`0x86` (UI scripts
+`GameInviteValidation` / `GameInviteJoin`), plus the existing `0x7E`/`0x7F` (`joinGame`) and `0x63`/`0x64`. Removed as proven
+useless: `0x11`, `0x17`, `0x18`, `0x42`, `0x44`, `0x5F`, `0x60`, `0x62`. Cave: `0x0211D810..0x0211E1E8` of `0x0211E200`.
+**Unverified:** whether the invitation list shows up and FIFA's accept path (UI scripts included) reaches `joinGame` on the
+friend's PC; whether the lobby survives the SportsWorld failures once both players are in the game; whether the
+server's `joinGame` (never run against a real client) is accepted.
+
+## Session 2026-10-12 (round 3 results: the UI never asks for an invitation)
 
 **Test.** Round-3 patch (trace + the then-experiment "force `OnOnlineCreateSession`") on both PCs, host and friend each
 created sessions several times (host 5x, friend 2x), logs of both PCs + server.
@@ -218,6 +283,10 @@ patch (`tools/rpcs3_patch_trace_invites.yml`) that logs when selected game funct
   `install_trace_patch.py` replaces entries of earlier rounds (any header starting with `FIFA trace` / `FIFA eksperyment`)
   and installs both entries (`--no-experiment` skips the second). Hooks `0x53`, `0x56`-`0x5A`, `0x7A`-`0x7D` were removed
   (proven irrelevant) to make room.
+- **Round 5** (44 hooks + 1 mid-function marker + 1 experiment entry with two hooks): see "Latest session: 2026-10-12 (round 4
+  results)". The experiment entry was renamed to **"FIFA eksperyment - zaproszenia (wyslij po createGame, odbierz liste
+  zaproszen)"** (`install_trace_patch.py` still replaces any older entry by prefix). `--verify-elf` also checks the receiver
+  hook site. Note: after each round the generated YAML must be re-installed on **both** PCs.
 - Install on **both** PCs (the friend's side shows whether anything arrives). If the game does not start after enabling
   it, untick the patch in RPCS3's Patch Manager. The first launch after a patch change recompiles the PPU (minutes).
 

@@ -8,6 +8,9 @@ funkcja zostala wywolana, z argumentami r3/r4/r5. Dla zdarzen UI (znacznik 0x01)
 (wymaga --elf = EBOOT.ELF z tej samej wersji gry; bez tego wypisuje sam adres napisu).
 Zwykle zdarzenia sa domyslnie pomijane, jesli wystepuja bardzo czesto -- --all wypisuje wszystkie.
 Dodatkowo pokazuje wywolania NP (sceNpBasic*), zeby bylo widac je obok znacznikow.
+Runda 5: znacznik 0x82 = odbior zaproszenia u kolegi (zdarzenie NP 5/23 -> sceNpBasicRecvMessageCustom; k=1 = wynik, 0 = wybrano
+zaproszenie); potem powinny pojawic sie 0x80 (zdarzenie 14), 0x83 (odczyt danych zaproszenia), 0x84 InviteAccepted,
+0x85/0x86 GameInviteValidation/GameInviteJoin i 0x7E/0x7F GameSessionManager::joinGame (+ `OSDK GBRS/JOIN`).
 Runda 4: znacznik 0x81 = wynik eksperymentu "natywne SendGameInvite" (kto jest pierwszym znajomym RPCN; potem powinny
 pojawic sie 0x10 adaptor SendGameInvite, 0x12/0x13/0x14/0x15/0x16 lancuch zaproszenia i `sceNpBasicSendMessageGui`).
 Runda 3: przy kazdym znaczniku "<- LR (fn START)" = kto wolal (wymaga --elf); znacznik 0x70 pokazuje, jaki kod
@@ -28,6 +31,7 @@ from make_trace_patch import TARGETS, MIDS      # noqa: E402
 NAMES = {t[0]: t[1] for t in TARGETS}
 NAMES.update({t[0]: t[1] for t in MIDS})
 NAMES[0x81] = "eksperyment: natywne SendGameInvite"
+NAMES[0x82] = "eksperyment: odbior zaproszenia (sceNpBasicRecvMessageCustom)"
 MID_IDS = {t[0] for t in MIDS}
 LINE = re.compile(r"^\S+\s+(\d+):(\d\d):(\d\d)\.(\d+)\s+(?:\{([^}]*)\}\s+)?(.*)$")
 RTC = re.compile(r"cellRtcSetTime_t\(pDateTime=\*0x[0-9a-fA-F]+, iTime=0x([0-9a-fA-F]+)\)")
@@ -182,6 +186,15 @@ def main(argv):
             nm = b"".join(a.get(k, 0).to_bytes(4, "big") for k in (1, 2)).split(b"\0", 1)[0].decode("latin-1")
             print("%s INVITE-STUB sceNpBasicGetFriendPresenceByIndex(0) -> %s%s  nazwa znajomego='%s'" % (
                 head, "OK" if res == 0 else "BLAD 0x%08X" % res, "" if res == 0 else " (brak znajomego/RPCN?)", nm))
+            continue
+        if ev["id"] == 0x82:
+            if 1 in a and 0 not in a:
+                res = a[1]
+                print("%s RECV-STUB sceNpBasicRecvMessageCustom(INVITE) -> 0x%08X %s" % (
+                    head, res, "(zaproszenie wybrane)" if res == 0 else "(anulowano / blad)"))
+            else:
+                print("%s RECV-STUB zdarzenie NP %d (5=zaproszenie, 23=zaproszenie bootowalne) -> otwieram liste zaproszen" % (
+                    head, a.get(0, 0)))
             continue
         if ev["id"] == 0x70:
             code = a.get(2, 0)

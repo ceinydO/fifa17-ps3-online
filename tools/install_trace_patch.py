@@ -6,8 +6,8 @@
 
 Argument to folder z rpcs3.exe (tam jest podfolder patches\\patch.yml). Tworzy kopie patch.yml.bak.
 Po dopisaniu: RPCS3 -> Manage -> Patch Manager -> FIFA 17 -> BLES02233 -> zaznacz
-"FIFA trace (zaproszenia i zdarzenia UI)" (oraz, jesli chcesz sprobowac eksperymentu, "FIFA eksperyment - wyslij
-zaproszenie do znajomego po createGame") i uruchom gre od nowa. Pierwsze uruchomienie kompiluje PPU (kilka minut).
+"FIFA trace (zaproszenia i zdarzenia UI)" (oraz, jesli chcesz sprobowac eksperymentu, "FIFA eksperyment - zaproszenia
+(wyslij po createGame, odbierz liste zaproszen)") i uruchom gre od nowa. Pierwsze uruchomienie kompiluje PPU (kilka minut).
 Opcja --no-experiment pomija wpis eksperymentu (zostaje sam znacznik).
 """
 from __future__ import annotations

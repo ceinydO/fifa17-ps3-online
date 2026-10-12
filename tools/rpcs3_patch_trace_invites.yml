@@ -12,22 +12,17 @@
 # Znaczniki:
 #   0x01  0x015FFB68  EVT  post_event(this, nazwa_zdarzenia, dane)
 #   0x10  0x016491B4  adaptor SendGameInvite (UI -> C++)
-#   0x11  0x01649264  adaptor SendMultipleGameInvites (UI -> C++)
 #   0x12  0x00301AD4  ginv::SendGameInvite
 #   0x13  0x003019A4  Invitations op ctor (SendGameInvite)
 #   0x14  0x002CD938  puid: LookupPlatformUserId start
 #   0x15  0x0030262C  puid: wynik wyszukiwania (30262c)
 #   0x16  0x00302454  NP: ostatni krok przed sceNpBasicSendMessageGui (302454)
-#   0x17  0x00302184  ginv: rejestracja modulu zaproszen (302184)
-#   0x18  0x00301C88  SendPartyGameInvites
 #   0x20  0x002DEE08  createGame: callback sukcesu 'GSMR' (2dee08)
 #   0x30  0x00AE0C04  NP: handler zdarzen basic (zaproszenia/wiadomosci)
 #   0x31  0x00ADF1DC  NP: callback managera
 #   0x40  0x00309388  SportsWorld: ConnectToSportsWorld
 #   0x41  0x0030F2F0  SportsWorld: LoadSportsWorldUserPresence
-#   0x42  0x0030F068  SportsWorld: SendFriendsToSportsWorld
 #   0x43  0x00311FDC  SportsWorld: LoadSportsWorldUsers
-#   0x44  0x0030E498  SportsWorld: SendMatchupStatsToSportsWorld
 #   0x50  0x002E8448  OSDK trace(kategoria 4cc, zdarzenie 4cc)
 #   0x51  0x0028EFA4  GameSessionManager::createGame(parametry, listener)
 #   0x52  0x0028E208  CreateGame op: konstruktor
@@ -37,10 +32,7 @@
 #   0x5C  0x00C6A4E0  Blaze: onNetworkCreated (c6a4e0)
 #   0x5D  0x00C6A204  Blaze: wysylka finalizeGameCreation (c6a204)
 #   0x5E  0x00C6BF74  Blaze: odpowiedz na finalizeGameCreation (c6bf74)
-#   0x5F  0x004D087C  FSM poczekalni: start (4d087c)
-#   0x60  0x004CF708  FSM poczekalni: przerwanie/timeout (4cf708)
 #   0x61  0x004D0AA4  FSM poczekalni: konsument zdarzen (4d0aa4)
-#   0x62  0x004CF59C  FSM poczekalni: 4cf59c
 #   0x63  0x004CF1F8  FifaOnline::StartInviteFlowPrep (4cf1f8)
 #   0x64  0x004CF2F8  GameInviteScreenAbort (4cf2f8)
 #   0x71  0x0038ACA4  UI skrypt: wywolanie funkcji 'Handle_<nazwa>' (napisy) (38aca4)
@@ -52,8 +44,16 @@
 #   0x77  0x016495B4  listener zaproszen: USER_INVITE sukces (16495b4)
 #   0x78  0x0164964C  listener zaproszen: USER_INVITE porazka (164964c)
 #   0x79  0x01625504  EVENT_MATCHUP_SUCCESS: nadawca zdarzenia (1625504)
-#   0x7E  0x00290B18  GameSessionManager JoinGame? (290b18)
-#   0x7F  0x00290DD8  GameSessionManager JoinGame? (290dd8)
+#   0x7E  0x00290B18  GameSessionManager::joinGame (290b18)
+#   0x7F  0x00290DD8  GameSessionManager::joinGame, wariant (290dd8)
+#   0x80  0x002F941C  NP: zdarzenie 14 'zaproszenie wybrane' (r4=zdarzenie) (2f941c)
+#   0x83  0x002F3B50  NP: odczyt danych wybranego zaproszenia (r4=id) (2f3b50)
+#   0x84  0x004DE29C  FifaOnline::InviteAccepted -- zdarzenie online (4de29c)
+#   0x85  0x004CF0AC  UI: GameInviteValidation (4cf0ac)
+#   0x86  0x004CE70C  UI: GameInviteJoin (4ce70c)
+#   0x87  0x004F19D4  InviteHandler: obsluga InviteAccepted (r4=wsk. na 12 B danych zaproszenia) (4f19d4)
+#   0x88  0x006185E8  FifaOnline::NotifyInvitationStatus -- zdarzenie online (6185e8)
+#   0x89  0x006184C4  FifaOnline::InviteFlowPrepComplete -- zdarzenie online (6184c4)
 #   0x70  0x002DEF74  [w srodku funkcji] createGame (GSMR) tuz przed `mtctr r5`: r3=listener, r4=sesja, r5=KOD listenera, ktory zaraz zostanie wywolany
 
   FIFA trace (zaproszenia i zdarzenia UI):
@@ -67,48 +67,48 @@
           # --- podmiana drugiego slowa (bl _savegpr) w funkcjach / jednej instrukcji w srodku funkcji na bl do stuba ---
           - [ be32, 0x015FFB6C, 0x48B1E125 ]   # EVT  post_event(this, nazwa_zdarzenia, dane) -> stub 0x0211DC90
           - [ be32, 0x016491B8, 0x48AD4AED ]   # adaptor SendGameInvite (UI -> C++) -> stub 0x0211DCA4
-          - [ be32, 0x01649268, 0x48AD4A51 ]   # adaptor SendMultipleGameInvites (UI -> C++) -> stub 0x0211DCB8
-          - [ be32, 0x00301AD8, 0x49E1C1F5 ]   # ginv::SendGameInvite -> stub 0x0211DCCC
-          - [ be32, 0x003019A8, 0x49E1C339 ]   # Invitations op ctor (SendGameInvite) -> stub 0x0211DCE0
-          - [ be32, 0x002CD93C, 0x49E503B9 ]   # puid: LookupPlatformUserId start -> stub 0x0211DCF4
-          - [ be32, 0x00302630, 0x49E1B6D9 ]   # puid: wynik wyszukiwania (30262c) -> stub 0x0211DD08
-          - [ be32, 0x00302458, 0x49E1B8C5 ]   # NP: ostatni krok przed sceNpBasicSendMessageGui (302454) -> stub 0x0211DD1C
-          - [ be32, 0x00302188, 0x49E1BBA9 ]   # ginv: rejestracja modulu zaproszen (302184) -> stub 0x0211DD30
-          - [ be32, 0x00301C8C, 0x49E1C0B9 ]   # SendPartyGameInvites -> stub 0x0211DD44
-          - [ be32, 0x002DEE0C, 0x49E3EF4D ]   # createGame: callback sukcesu 'GSMR' (2dee08) -> stub 0x0211DD58
-          - [ be32, 0x00AE0C08, 0x4963D165 ]   # NP: handler zdarzen basic (zaproszenia/wiadomosci) -> stub 0x0211DD6C
-          - [ be32, 0x00ADF1E0, 0x4963EBA1 ]   # NP: callback managera -> stub 0x0211DD80
-          - [ be32, 0x0030938C, 0x49E14A09 ]   # SportsWorld: ConnectToSportsWorld -> stub 0x0211DD94
-          - [ be32, 0x0030F2F4, 0x49E0EAB5 ]   # SportsWorld: LoadSportsWorldUserPresence -> stub 0x0211DDA8
-          - [ be32, 0x0030F06C, 0x49E0ED51 ]   # SportsWorld: SendFriendsToSportsWorld -> stub 0x0211DDBC
-          - [ be32, 0x00311FE0, 0x49E0BDF1 ]   # SportsWorld: LoadSportsWorldUsers -> stub 0x0211DDD0
-          - [ be32, 0x0030E49C, 0x49E0F949 ]   # SportsWorld: SendMatchupStatsToSportsWorld -> stub 0x0211DDE4
-          - [ be32, 0x002E844C, 0x49E359AD ]   # OSDK trace(kategoria 4cc, zdarzenie 4cc) -> stub 0x0211DDF8
-          - [ be32, 0x0028EFA8, 0x49E8EE65 ]   # GameSessionManager::createGame(parametry, listener) -> stub 0x0211DE0C
-          - [ be32, 0x0028E20C, 0x49E8FC15 ]   # CreateGame op: konstruktor -> stub 0x0211DE20
-          - [ be32, 0x002891E8, 0x49E94C4D ]   # GameSession: konstruktor -> stub 0x0211DE34
-          - [ be32, 0x002911BC, 0x49E8CC8D ]   # gses::setCurrentSession -> stub 0x0211DE48
-          - [ be32, 0x00C6E0BC, 0x494AFDA1 ]   # Blaze: handler NotifyGameSetup -> stub 0x0211DE5C
-          - [ be32, 0x00C6A4E4, 0x494B398D ]   # Blaze: onNetworkCreated (c6a4e0) -> stub 0x0211DE70
-          - [ be32, 0x00C6A208, 0x494B3C7D ]   # Blaze: wysylka finalizeGameCreation (c6a204) -> stub 0x0211DE84
-          - [ be32, 0x00C6BF78, 0x494B1F21 ]   # Blaze: odpowiedz na finalizeGameCreation (c6bf74) -> stub 0x0211DE98
-          - [ be32, 0x004D0880, 0x49C4D62D ]   # FSM poczekalni: start (4d087c) -> stub 0x0211DEAC
-          - [ be32, 0x004CF70C, 0x49C4E7B5 ]   # FSM poczekalni: przerwanie/timeout (4cf708) -> stub 0x0211DEC0
-          - [ be32, 0x004D0AA8, 0x49C4D42D ]   # FSM poczekalni: konsument zdarzen (4d0aa4) -> stub 0x0211DED4
-          - [ be32, 0x004CF5A0, 0x49C4E949 ]   # FSM poczekalni: 4cf59c -> stub 0x0211DEE8
-          - [ be32, 0x004CF1FC, 0x49C4ED01 ]   # FifaOnline::StartInviteFlowPrep (4cf1f8) -> stub 0x0211DEFC
-          - [ be32, 0x004CF2FC, 0x49C4EC15 ]   # GameInviteScreenAbort (4cf2f8) -> stub 0x0211DF10
-          - [ be32, 0x0038ACA8, 0x49D9327D ]   # UI skrypt: wywolanie funkcji 'Handle_<nazwa>' (napisy) (38aca4) -> stub 0x0211DF24
-          - [ be32, 0x0038B114, 0x49D92E25 ]   # UI skrypt: wywolanie funkcji 'Handle_<nazwa>' (obiekt) (38b110) -> stub 0x0211DF38
-          - [ be32, 0x002DF80C, 0x49E3E741 ]   # gses: wynik operacji 2df808 -> stub 0x0211DF4C
-          - [ be32, 0x002DF97C, 0x49E3E5E5 ]   # gses: wynik operacji 2df978 -> stub 0x0211DF60
-          - [ be32, 0x002DFB24, 0x49E3E451 ]   # gses: wynik operacji 2dfb20 -> stub 0x0211DF74
-          - [ be32, 0x01649778, 0x48AD4811 ]   # EVENT_GAME_INVITE_RECEIVED: nadawca zdarzenia (1649774) -> stub 0x0211DF88
-          - [ be32, 0x016495B8, 0x48AD49E5 ]   # listener zaproszen: USER_INVITE sukces (16495b4) -> stub 0x0211DF9C
-          - [ be32, 0x01649650, 0x48AD4961 ]   # listener zaproszen: USER_INVITE porazka (164964c) -> stub 0x0211DFB0
-          - [ be32, 0x01625508, 0x48AF8ABD ]   # EVENT_MATCHUP_SUCCESS: nadawca zdarzenia (1625504) -> stub 0x0211DFC4
-          - [ be32, 0x00290B1C, 0x49E8D4BD ]   # GameSessionManager JoinGame? (290b18) -> stub 0x0211DFD8
-          - [ be32, 0x00290DDC, 0x49E8D211 ]   # GameSessionManager JoinGame? (290dd8) -> stub 0x0211DFEC
+          - [ be32, 0x00301AD8, 0x49E1C1E1 ]   # ginv::SendGameInvite -> stub 0x0211DCB8
+          - [ be32, 0x003019A8, 0x49E1C325 ]   # Invitations op ctor (SendGameInvite) -> stub 0x0211DCCC
+          - [ be32, 0x002CD93C, 0x49E503A5 ]   # puid: LookupPlatformUserId start -> stub 0x0211DCE0
+          - [ be32, 0x00302630, 0x49E1B6C5 ]   # puid: wynik wyszukiwania (30262c) -> stub 0x0211DCF4
+          - [ be32, 0x00302458, 0x49E1B8B1 ]   # NP: ostatni krok przed sceNpBasicSendMessageGui (302454) -> stub 0x0211DD08
+          - [ be32, 0x002DEE0C, 0x49E3EF11 ]   # createGame: callback sukcesu 'GSMR' (2dee08) -> stub 0x0211DD1C
+          - [ be32, 0x00AE0C08, 0x4963D129 ]   # NP: handler zdarzen basic (zaproszenia/wiadomosci) -> stub 0x0211DD30
+          - [ be32, 0x00ADF1E0, 0x4963EB65 ]   # NP: callback managera -> stub 0x0211DD44
+          - [ be32, 0x0030938C, 0x49E149CD ]   # SportsWorld: ConnectToSportsWorld -> stub 0x0211DD58
+          - [ be32, 0x0030F2F4, 0x49E0EA79 ]   # SportsWorld: LoadSportsWorldUserPresence -> stub 0x0211DD6C
+          - [ be32, 0x00311FE0, 0x49E0BDA1 ]   # SportsWorld: LoadSportsWorldUsers -> stub 0x0211DD80
+          - [ be32, 0x002E844C, 0x49E35949 ]   # OSDK trace(kategoria 4cc, zdarzenie 4cc) -> stub 0x0211DD94
+          - [ be32, 0x0028EFA8, 0x49E8EE01 ]   # GameSessionManager::createGame(parametry, listener) -> stub 0x0211DDA8
+          - [ be32, 0x0028E20C, 0x49E8FBB1 ]   # CreateGame op: konstruktor -> stub 0x0211DDBC
+          - [ be32, 0x002891E8, 0x49E94BE9 ]   # GameSession: konstruktor -> stub 0x0211DDD0
+          - [ be32, 0x002911BC, 0x49E8CC29 ]   # gses::setCurrentSession -> stub 0x0211DDE4
+          - [ be32, 0x00C6E0BC, 0x494AFD3D ]   # Blaze: handler NotifyGameSetup -> stub 0x0211DDF8
+          - [ be32, 0x00C6A4E4, 0x494B3929 ]   # Blaze: onNetworkCreated (c6a4e0) -> stub 0x0211DE0C
+          - [ be32, 0x00C6A208, 0x494B3C19 ]   # Blaze: wysylka finalizeGameCreation (c6a204) -> stub 0x0211DE20
+          - [ be32, 0x00C6BF78, 0x494B1EBD ]   # Blaze: odpowiedz na finalizeGameCreation (c6bf74) -> stub 0x0211DE34
+          - [ be32, 0x004D0AA8, 0x49C4D3A1 ]   # FSM poczekalni: konsument zdarzen (4d0aa4) -> stub 0x0211DE48
+          - [ be32, 0x004CF1FC, 0x49C4EC61 ]   # FifaOnline::StartInviteFlowPrep (4cf1f8) -> stub 0x0211DE5C
+          - [ be32, 0x004CF2FC, 0x49C4EB75 ]   # GameInviteScreenAbort (4cf2f8) -> stub 0x0211DE70
+          - [ be32, 0x0038ACA8, 0x49D931DD ]   # UI skrypt: wywolanie funkcji 'Handle_<nazwa>' (napisy) (38aca4) -> stub 0x0211DE84
+          - [ be32, 0x0038B114, 0x49D92D85 ]   # UI skrypt: wywolanie funkcji 'Handle_<nazwa>' (obiekt) (38b110) -> stub 0x0211DE98
+          - [ be32, 0x002DF80C, 0x49E3E6A1 ]   # gses: wynik operacji 2df808 -> stub 0x0211DEAC
+          - [ be32, 0x002DF97C, 0x49E3E545 ]   # gses: wynik operacji 2df978 -> stub 0x0211DEC0
+          - [ be32, 0x002DFB24, 0x49E3E3B1 ]   # gses: wynik operacji 2dfb20 -> stub 0x0211DED4
+          - [ be32, 0x01649778, 0x48AD4771 ]   # EVENT_GAME_INVITE_RECEIVED: nadawca zdarzenia (1649774) -> stub 0x0211DEE8
+          - [ be32, 0x016495B8, 0x48AD4945 ]   # listener zaproszen: USER_INVITE sukces (16495b4) -> stub 0x0211DEFC
+          - [ be32, 0x01649650, 0x48AD48C1 ]   # listener zaproszen: USER_INVITE porazka (164964c) -> stub 0x0211DF10
+          - [ be32, 0x01625508, 0x48AF8A1D ]   # EVENT_MATCHUP_SUCCESS: nadawca zdarzenia (1625504) -> stub 0x0211DF24
+          - [ be32, 0x00290B1C, 0x49E8D41D ]   # GameSessionManager::joinGame (290b18) -> stub 0x0211DF38
+          - [ be32, 0x00290DDC, 0x49E8D171 ]   # GameSessionManager::joinGame, wariant (290dd8) -> stub 0x0211DF4C
+          - [ be32, 0x002F9420, 0x49E24B41 ]   # NP: zdarzenie 14 'zaproszenie wybrane' (r4=zdarzenie) (2f941c) -> stub 0x0211DF60
+          - [ be32, 0x002F3B54, 0x49E2A421 ]   # NP: odczyt danych wybranego zaproszenia (r4=id) (2f3b50) -> stub 0x0211DF74
+          - [ be32, 0x004DE2A0, 0x49C3FCE9 ]   # FifaOnline::InviteAccepted -- zdarzenie online (4de29c) -> stub 0x0211DF88
+          - [ be32, 0x004CF0B0, 0x49C4EEED ]   # UI: GameInviteValidation (4cf0ac) -> stub 0x0211DF9C
+          - [ be32, 0x004CE710, 0x49C4F8A1 ]   # UI: GameInviteJoin (4ce70c) -> stub 0x0211DFB0
+          - [ be32, 0x004F19D8, 0x49C2C5ED ]   # InviteHandler: obsluga InviteAccepted (r4=wsk. na 12 B danych zaproszenia) (4f19d4) -> stub 0x0211DFC4
+          - [ be32, 0x006185EC, 0x49B059ED ]   # FifaOnline::NotifyInvitationStatus -- zdarzenie online (6185e8) -> stub 0x0211DFD8
+          - [ be32, 0x006184C8, 0x49B05B25 ]   # FifaOnline::InviteFlowPrepComplete -- zdarzenie online (6184c4) -> stub 0x0211DFEC
           - [ be32, 0x002DEF74, 0x49E3F08D ]   # createGame (GSMR) tuz przed `mtctr r5`: r3=listener, r4=sesja, r5=KOD listenera, ktory zaraz zostanie wywolany -> stub 0x0211E000
           # --- kod w jaskini 0x0211D810..0x0211E030 ---
           - [ be32, 0x0211D810, 0xF821FE41 ]
@@ -402,216 +402,216 @@
           - [ be32, 0x0211DCAC, 0x4BFFFB65 ]
           - [ be32, 0x0211DCB0, 0x7D8803A6 ]
           - [ be32, 0x0211DCB4, 0x4B83787C ]
-          - [ be32, 0x0211DCB8, 0x3D60FA11 ]
+          - [ be32, 0x0211DCB8, 0x3D60FA12 ]
           - [ be32, 0x0211DCBC, 0x7D8802A6 ]
           - [ be32, 0x0211DCC0, 0x4BFFFB51 ]
           - [ be32, 0x0211DCC4, 0x7D8803A6 ]
-          - [ be32, 0x0211DCC8, 0x4B83785C ]
-          - [ be32, 0x0211DCCC, 0x3D60FA12 ]
+          - [ be32, 0x0211DCC8, 0x4B837860 ]
+          - [ be32, 0x0211DCCC, 0x3D60FA13 ]
           - [ be32, 0x0211DCD0, 0x7D8802A6 ]
           - [ be32, 0x0211DCD4, 0x4BFFFB3D ]
           - [ be32, 0x0211DCD8, 0x7D8803A6 ]
-          - [ be32, 0x0211DCDC, 0x4B83784C ]
-          - [ be32, 0x0211DCE0, 0x3D60FA13 ]
+          - [ be32, 0x0211DCDC, 0x4B837850 ]
+          - [ be32, 0x0211DCE0, 0x3D60FA14 ]
           - [ be32, 0x0211DCE4, 0x7D8802A6 ]
           - [ be32, 0x0211DCE8, 0x4BFFFB29 ]
           - [ be32, 0x0211DCEC, 0x7D8803A6 ]
-          - [ be32, 0x0211DCF0, 0x4B83783C ]
-          - [ be32, 0x0211DCF4, 0x3D60FA14 ]
+          - [ be32, 0x0211DCF0, 0x4B837840 ]
+          - [ be32, 0x0211DCF4, 0x3D60FA15 ]
           - [ be32, 0x0211DCF8, 0x7D8802A6 ]
           - [ be32, 0x0211DCFC, 0x4BFFFB15 ]
           - [ be32, 0x0211DD00, 0x7D8803A6 ]
-          - [ be32, 0x0211DD04, 0x4B83782C ]
-          - [ be32, 0x0211DD08, 0x3D60FA15 ]
+          - [ be32, 0x0211DD04, 0x4B837828 ]
+          - [ be32, 0x0211DD08, 0x3D60FA16 ]
           - [ be32, 0x0211DD0C, 0x7D8802A6 ]
           - [ be32, 0x0211DD10, 0x4BFFFB01 ]
           - [ be32, 0x0211DD14, 0x7D8803A6 ]
-          - [ be32, 0x0211DD18, 0x4B837814 ]
-          - [ be32, 0x0211DD1C, 0x3D60FA16 ]
+          - [ be32, 0x0211DD18, 0x4B837820 ]
+          - [ be32, 0x0211DD1C, 0x3D60FA20 ]
           - [ be32, 0x0211DD20, 0x7D8802A6 ]
           - [ be32, 0x0211DD24, 0x4BFFFAED ]
           - [ be32, 0x0211DD28, 0x7D8803A6 ]
-          - [ be32, 0x0211DD2C, 0x4B83780C ]
-          - [ be32, 0x0211DD30, 0x3D60FA17 ]
+          - [ be32, 0x0211DD2C, 0x4B837800 ]
+          - [ be32, 0x0211DD30, 0x3D60FA30 ]
           - [ be32, 0x0211DD34, 0x7D8802A6 ]
           - [ be32, 0x0211DD38, 0x4BFFFAD9 ]
           - [ be32, 0x0211DD3C, 0x7D8803A6 ]
-          - [ be32, 0x0211DD40, 0x4B8377F8 ]
-          - [ be32, 0x0211DD44, 0x3D60FA18 ]
+          - [ be32, 0x0211DD40, 0x4B8377F4 ]
+          - [ be32, 0x0211DD44, 0x3D60FA31 ]
           - [ be32, 0x0211DD48, 0x7D8802A6 ]
           - [ be32, 0x0211DD4C, 0x4BFFFAC5 ]
           - [ be32, 0x0211DD50, 0x7D8803A6 ]
           - [ be32, 0x0211DD54, 0x4B8377E4 ]
-          - [ be32, 0x0211DD58, 0x3D60FA20 ]
+          - [ be32, 0x0211DD58, 0x3D60FA40 ]
           - [ be32, 0x0211DD5C, 0x7D8802A6 ]
           - [ be32, 0x0211DD60, 0x4BFFFAB1 ]
           - [ be32, 0x0211DD64, 0x7D8803A6 ]
-          - [ be32, 0x0211DD68, 0x4B8377C4 ]
-          - [ be32, 0x0211DD6C, 0x3D60FA30 ]
+          - [ be32, 0x0211DD68, 0x4B8377D0 ]
+          - [ be32, 0x0211DD6C, 0x3D60FA41 ]
           - [ be32, 0x0211DD70, 0x7D8802A6 ]
           - [ be32, 0x0211DD74, 0x4BFFFA9D ]
           - [ be32, 0x0211DD78, 0x7D8803A6 ]
           - [ be32, 0x0211DD7C, 0x4B8377B8 ]
-          - [ be32, 0x0211DD80, 0x3D60FA31 ]
+          - [ be32, 0x0211DD80, 0x3D60FA43 ]
           - [ be32, 0x0211DD84, 0x7D8802A6 ]
           - [ be32, 0x0211DD88, 0x4BFFFA89 ]
           - [ be32, 0x0211DD8C, 0x7D8803A6 ]
           - [ be32, 0x0211DD90, 0x4B8377A8 ]
-          - [ be32, 0x0211DD94, 0x3D60FA40 ]
+          - [ be32, 0x0211DD94, 0x3D60FA50 ]
           - [ be32, 0x0211DD98, 0x7D8802A6 ]
           - [ be32, 0x0211DD9C, 0x4BFFFA75 ]
           - [ be32, 0x0211DDA0, 0x7D8803A6 ]
           - [ be32, 0x0211DDA4, 0x4B837794 ]
-          - [ be32, 0x0211DDA8, 0x3D60FA41 ]
+          - [ be32, 0x0211DDA8, 0x3D60FA51 ]
           - [ be32, 0x0211DDAC, 0x7D8802A6 ]
           - [ be32, 0x0211DDB0, 0x4BFFFA61 ]
           - [ be32, 0x0211DDB4, 0x7D8803A6 ]
-          - [ be32, 0x0211DDB8, 0x4B83777C ]
-          - [ be32, 0x0211DDBC, 0x3D60FA42 ]
+          - [ be32, 0x0211DDB8, 0x4B837758 ]
+          - [ be32, 0x0211DDBC, 0x3D60FA52 ]
           - [ be32, 0x0211DDC0, 0x7D8802A6 ]
           - [ be32, 0x0211DDC4, 0x4BFFFA4D ]
           - [ be32, 0x0211DDC8, 0x7D8803A6 ]
-          - [ be32, 0x0211DDCC, 0x4B837770 ]
-          - [ be32, 0x0211DDD0, 0x3D60FA43 ]
+          - [ be32, 0x0211DDCC, 0x4B83774C ]
+          - [ be32, 0x0211DDD0, 0x3D60FA54 ]
           - [ be32, 0x0211DDD4, 0x7D8802A6 ]
           - [ be32, 0x0211DDD8, 0x4BFFFA39 ]
           - [ be32, 0x0211DDDC, 0x7D8803A6 ]
-          - [ be32, 0x0211DDE0, 0x4B837758 ]
-          - [ be32, 0x0211DDE4, 0x3D60FA44 ]
+          - [ be32, 0x0211DDE0, 0x4B837754 ]
+          - [ be32, 0x0211DDE4, 0x3D60FA55 ]
           - [ be32, 0x0211DDE8, 0x7D8802A6 ]
           - [ be32, 0x0211DDEC, 0x4BFFFA25 ]
           - [ be32, 0x0211DDF0, 0x7D8803A6 ]
-          - [ be32, 0x0211DDF4, 0x4B837728 ]
-          - [ be32, 0x0211DDF8, 0x3D60FA50 ]
+          - [ be32, 0x0211DDF4, 0x4B837744 ]
+          - [ be32, 0x0211DDF8, 0x3D60FA5B ]
           - [ be32, 0x0211DDFC, 0x7D8802A6 ]
           - [ be32, 0x0211DE00, 0x4BFFFA11 ]
           - [ be32, 0x0211DE04, 0x7D8803A6 ]
-          - [ be32, 0x0211DE08, 0x4B837730 ]
-          - [ be32, 0x0211DE0C, 0x3D60FA51 ]
+          - [ be32, 0x0211DE08, 0x4B837714 ]
+          - [ be32, 0x0211DE0C, 0x3D60FA5C ]
           - [ be32, 0x0211DE10, 0x7D8802A6 ]
           - [ be32, 0x0211DE14, 0x4BFFF9FD ]
           - [ be32, 0x0211DE18, 0x7D8803A6 ]
-          - [ be32, 0x0211DE1C, 0x4B8376F4 ]
-          - [ be32, 0x0211DE20, 0x3D60FA52 ]
+          - [ be32, 0x0211DE1C, 0x4B837714 ]
+          - [ be32, 0x0211DE20, 0x3D60FA5D ]
           - [ be32, 0x0211DE24, 0x7D8802A6 ]
           - [ be32, 0x0211DE28, 0x4BFFF9E9 ]
           - [ be32, 0x0211DE2C, 0x7D8803A6 ]
-          - [ be32, 0x0211DE30, 0x4B8376E8 ]
-          - [ be32, 0x0211DE34, 0x3D60FA54 ]
+          - [ be32, 0x0211DE30, 0x4B83770C ]
+          - [ be32, 0x0211DE34, 0x3D60FA5E ]
           - [ be32, 0x0211DE38, 0x7D8802A6 ]
           - [ be32, 0x0211DE3C, 0x4BFFF9D5 ]
           - [ be32, 0x0211DE40, 0x7D8803A6 ]
-          - [ be32, 0x0211DE44, 0x4B8376F0 ]
-          - [ be32, 0x0211DE48, 0x3D60FA55 ]
+          - [ be32, 0x0211DE44, 0x4B8376F8 ]
+          - [ be32, 0x0211DE48, 0x3D60FA61 ]
           - [ be32, 0x0211DE4C, 0x7D8802A6 ]
           - [ be32, 0x0211DE50, 0x4BFFF9C1 ]
           - [ be32, 0x0211DE54, 0x7D8803A6 ]
-          - [ be32, 0x0211DE58, 0x4B8376E0 ]
-          - [ be32, 0x0211DE5C, 0x3D60FA5B ]
+          - [ be32, 0x0211DE58, 0x4B8376BC ]
+          - [ be32, 0x0211DE5C, 0x3D60FA63 ]
           - [ be32, 0x0211DE60, 0x7D8802A6 ]
           - [ be32, 0x0211DE64, 0x4BFFF9AD ]
           - [ be32, 0x0211DE68, 0x7D8803A6 ]
-          - [ be32, 0x0211DE6C, 0x4B8376B0 ]
-          - [ be32, 0x0211DE70, 0x3D60FA5C ]
+          - [ be32, 0x0211DE6C, 0x4B8376CC ]
+          - [ be32, 0x0211DE70, 0x3D60FA64 ]
           - [ be32, 0x0211DE74, 0x7D8802A6 ]
           - [ be32, 0x0211DE78, 0x4BFFF999 ]
           - [ be32, 0x0211DE7C, 0x7D8803A6 ]
-          - [ be32, 0x0211DE80, 0x4B8376B0 ]
-          - [ be32, 0x0211DE84, 0x3D60FA5D ]
+          - [ be32, 0x0211DE80, 0x4B8376BC ]
+          - [ be32, 0x0211DE84, 0x3D60FA71 ]
           - [ be32, 0x0211DE88, 0x7D8802A6 ]
-          - [ be32, 0x0211DE8C, 0x4BFFF985 ]
+          - [ be32, 0x0211DE8C, 0x4BFFFC65 ]
           - [ be32, 0x0211DE90, 0x7D8803A6 ]
-          - [ be32, 0x0211DE94, 0x4B8376A8 ]
-          - [ be32, 0x0211DE98, 0x3D60FA5E ]
+          - [ be32, 0x0211DE94, 0x4B8376A4 ]
+          - [ be32, 0x0211DE98, 0x3D60FA72 ]
           - [ be32, 0x0211DE9C, 0x7D8802A6 ]
-          - [ be32, 0x0211DEA0, 0x4BFFF971 ]
+          - [ be32, 0x0211DEA0, 0x4BFFFC51 ]
           - [ be32, 0x0211DEA4, 0x7D8803A6 ]
-          - [ be32, 0x0211DEA8, 0x4B837694 ]
-          - [ be32, 0x0211DEAC, 0x3D60FA5F ]
+          - [ be32, 0x0211DEA8, 0x4B837690 ]
+          - [ be32, 0x0211DEAC, 0x3D60FA73 ]
           - [ be32, 0x0211DEB0, 0x7D8802A6 ]
           - [ be32, 0x0211DEB4, 0x4BFFF95D ]
           - [ be32, 0x0211DEB8, 0x7D8803A6 ]
           - [ be32, 0x0211DEBC, 0x4B83767C ]
-          - [ be32, 0x0211DEC0, 0x3D60FA60 ]
+          - [ be32, 0x0211DEC0, 0x3D60FA74 ]
           - [ be32, 0x0211DEC4, 0x7D8802A6 ]
           - [ be32, 0x0211DEC8, 0x4BFFF949 ]
           - [ be32, 0x0211DECC, 0x7D8803A6 ]
-          - [ be32, 0x0211DED0, 0x4B837668 ]
-          - [ be32, 0x0211DED4, 0x3D60FA61 ]
+          - [ be32, 0x0211DED0, 0x4B837670 ]
+          - [ be32, 0x0211DED4, 0x3D60FA75 ]
           - [ be32, 0x0211DED8, 0x7D8802A6 ]
           - [ be32, 0x0211DEDC, 0x4BFFF935 ]
           - [ be32, 0x0211DEE0, 0x7D8803A6 ]
-          - [ be32, 0x0211DEE4, 0x4B837630 ]
-          - [ be32, 0x0211DEE8, 0x3D60FA62 ]
+          - [ be32, 0x0211DEE4, 0x4B83765C ]
+          - [ be32, 0x0211DEE8, 0x3D60FA76 ]
           - [ be32, 0x0211DEEC, 0x7D8802A6 ]
           - [ be32, 0x0211DEF0, 0x4BFFF921 ]
           - [ be32, 0x0211DEF4, 0x7D8803A6 ]
-          - [ be32, 0x0211DEF8, 0x4B837638 ]
-          - [ be32, 0x0211DEFC, 0x3D60FA63 ]
+          - [ be32, 0x0211DEF8, 0x4B83764C ]
+          - [ be32, 0x0211DEFC, 0x3D60FA77 ]
           - [ be32, 0x0211DF00, 0x7D8802A6 ]
           - [ be32, 0x0211DF04, 0x4BFFF90D ]
           - [ be32, 0x0211DF08, 0x7D8803A6 ]
-          - [ be32, 0x0211DF0C, 0x4B83762C ]
-          - [ be32, 0x0211DF10, 0x3D60FA64 ]
+          - [ be32, 0x0211DF0C, 0x4B837634 ]
+          - [ be32, 0x0211DF10, 0x3D60FA78 ]
           - [ be32, 0x0211DF14, 0x7D8802A6 ]
           - [ be32, 0x0211DF18, 0x4BFFF8F9 ]
           - [ be32, 0x0211DF1C, 0x7D8803A6 ]
-          - [ be32, 0x0211DF20, 0x4B83761C ]
-          - [ be32, 0x0211DF24, 0x3D60FA71 ]
+          - [ be32, 0x0211DF20, 0x4B837620 ]
+          - [ be32, 0x0211DF24, 0x3D60FA79 ]
           - [ be32, 0x0211DF28, 0x7D8802A6 ]
-          - [ be32, 0x0211DF2C, 0x4BFFFBC5 ]
+          - [ be32, 0x0211DF2C, 0x4BFFF8E5 ]
           - [ be32, 0x0211DF30, 0x7D8803A6 ]
-          - [ be32, 0x0211DF34, 0x4B837604 ]
-          - [ be32, 0x0211DF38, 0x3D60FA72 ]
+          - [ be32, 0x0211DF34, 0x4B837608 ]
+          - [ be32, 0x0211DF38, 0x3D60FA7E ]
           - [ be32, 0x0211DF3C, 0x7D8802A6 ]
-          - [ be32, 0x0211DF40, 0x4BFFFBB1 ]
+          - [ be32, 0x0211DF40, 0x4BFFF8D1 ]
           - [ be32, 0x0211DF44, 0x7D8803A6 ]
-          - [ be32, 0x0211DF48, 0x4B8375F0 ]
-          - [ be32, 0x0211DF4C, 0x3D60FA73 ]
+          - [ be32, 0x0211DF48, 0x4B8375E4 ]
+          - [ be32, 0x0211DF4C, 0x3D60FA7F ]
           - [ be32, 0x0211DF50, 0x7D8802A6 ]
           - [ be32, 0x0211DF54, 0x4BFFF8BD ]
           - [ be32, 0x0211DF58, 0x7D8803A6 ]
-          - [ be32, 0x0211DF5C, 0x4B8375DC ]
-          - [ be32, 0x0211DF60, 0x3D60FA74 ]
+          - [ be32, 0x0211DF5C, 0x4B8375D0 ]
+          - [ be32, 0x0211DF60, 0x3D60FA80 ]
           - [ be32, 0x0211DF64, 0x7D8802A6 ]
           - [ be32, 0x0211DF68, 0x4BFFF8A9 ]
           - [ be32, 0x0211DF6C, 0x7D8803A6 ]
           - [ be32, 0x0211DF70, 0x4B8375D0 ]
-          - [ be32, 0x0211DF74, 0x3D60FA75 ]
+          - [ be32, 0x0211DF74, 0x3D60FA83 ]
           - [ be32, 0x0211DF78, 0x7D8802A6 ]
           - [ be32, 0x0211DF7C, 0x4BFFF895 ]
           - [ be32, 0x0211DF80, 0x7D8803A6 ]
-          - [ be32, 0x0211DF84, 0x4B8375BC ]
-          - [ be32, 0x0211DF88, 0x3D60FA76 ]
+          - [ be32, 0x0211DF84, 0x4B8375C0 ]
+          - [ be32, 0x0211DF88, 0x3D60FA84 ]
           - [ be32, 0x0211DF8C, 0x7D8802A6 ]
           - [ be32, 0x0211DF90, 0x4BFFF881 ]
           - [ be32, 0x0211DF94, 0x7D8803A6 ]
-          - [ be32, 0x0211DF98, 0x4B8375AC ]
-          - [ be32, 0x0211DF9C, 0x3D60FA77 ]
+          - [ be32, 0x0211DF98, 0x4B8375A4 ]
+          - [ be32, 0x0211DF9C, 0x3D60FA85 ]
           - [ be32, 0x0211DFA0, 0x7D8802A6 ]
           - [ be32, 0x0211DFA4, 0x4BFFF86D ]
           - [ be32, 0x0211DFA8, 0x7D8803A6 ]
-          - [ be32, 0x0211DFAC, 0x4B837594 ]
-          - [ be32, 0x0211DFB0, 0x3D60FA78 ]
+          - [ be32, 0x0211DFAC, 0x4B837588 ]
+          - [ be32, 0x0211DFB0, 0x3D60FA86 ]
           - [ be32, 0x0211DFB4, 0x7D8802A6 ]
           - [ be32, 0x0211DFB8, 0x4BFFF859 ]
           - [ be32, 0x0211DFBC, 0x7D8803A6 ]
-          - [ be32, 0x0211DFC0, 0x4B837580 ]
-          - [ be32, 0x0211DFC4, 0x3D60FA79 ]
+          - [ be32, 0x0211DFC0, 0x4B83756C ]
+          - [ be32, 0x0211DFC4, 0x3D60FA87 ]
           - [ be32, 0x0211DFC8, 0x7D8802A6 ]
           - [ be32, 0x0211DFCC, 0x4BFFF845 ]
           - [ be32, 0x0211DFD0, 0x7D8803A6 ]
           - [ be32, 0x0211DFD4, 0x4B837568 ]
-          - [ be32, 0x0211DFD8, 0x3D60FA7E ]
+          - [ be32, 0x0211DFD8, 0x3D60FA88 ]
           - [ be32, 0x0211DFDC, 0x7D8802A6 ]
           - [ be32, 0x0211DFE0, 0x4BFFF831 ]
           - [ be32, 0x0211DFE4, 0x7D8803A6 ]
-          - [ be32, 0x0211DFE8, 0x4B837544 ]
-          - [ be32, 0x0211DFEC, 0x3D60FA7F ]
+          - [ be32, 0x0211DFE8, 0x4B837558 ]
+          - [ be32, 0x0211DFEC, 0x3D60FA89 ]
           - [ be32, 0x0211DFF0, 0x7D8802A6 ]
           - [ be32, 0x0211DFF4, 0x4BFFF81D ]
           - [ be32, 0x0211DFF8, 0x7D8803A6 ]
-          - [ be32, 0x0211DFFC, 0x4B837530 ]
+          - [ be32, 0x0211DFFC, 0x4B837544 ]
           - [ be32, 0x0211E000, 0xF821FFD1 ]
           - [ be32, 0x0211E004, 0xF9610020 ]
           - [ be32, 0x0211E008, 0xF9810028 ]
@@ -625,89 +625,120 @@
           - [ be32, 0x0211E028, 0x7CA903A6 ]
           - [ be32, 0x0211E02C, 0x4E800020 ]
 
-  FIFA eksperyment - wyslij zaproszenie do znajomego po createGame:
+  FIFA eksperyment - zaproszenia (wyslij po createGame, odbierz liste zaproszen):
     Games:
       FIFA 17:
         BLES02233: [ "01.00" ]
     Author: "custom"
-    Notes: "Po udanym createGame wola natywnie SendGameInvite (adaptor 16491b4) dla pierwszego znajomego RPCN -- to, czego nie robi skrypt UI"
-    Patch Version: "1.0"
+    Notes: "Nadawca: po udanym createGame wola natywnie SendGameInvite (adaptor 16491b4) dla pierwszego znajomego RPCN. Odbiorca: po zdarzeniu NP 5/23 otwiera liste zaproszen (sceNpBasicRecvMessageCustom) -- to, czego nie robi skrypt UI"
+    Patch Version: "2.0"
     Patch:
-          - [ be32, 0x002DEF7C, 0x49E3F0B5 ]   # 2def7c: li r3,4 -> bl stub 0x0211E030
-          - [ be32, 0x0211E030, 0xF821FD01 ]
+          - [ be32, 0x00AE0208, 0x4963DE29 ]   # 0xae0208: lwz r3,0x560(r1) (odbior zaproszenia) -> bl stub 0x0211E030
+          - [ be32, 0x002DEF7C, 0x49E3F145 ]   # 2def7c: li r3,4 (wysylanie zaproszenia po createGame) -> bl stub 0x0211E0C0
+          - [ be32, 0x0211E030, 0xF821FFB1 ]
           - [ be32, 0x0211E034, 0x7C0802A6 ]
-          - [ be32, 0x0211E038, 0xF8010310 ]
-          - [ be32, 0x0211E03C, 0x38600000 ]
-          - [ be32, 0x0211E040, 0x90610080 ]
-          - [ be32, 0x0211E044, 0x90610084 ]
-          - [ be32, 0x0211E048, 0x38600000 ]
-          - [ be32, 0x0211E04C, 0x38810080 ]
-          - [ be32, 0x0211E050, 0x38A10160 ]
-          - [ be32, 0x0211E054, 0x38C00000 ]
-          - [ be32, 0x0211E058, 0x4BD836C1 ]
-          - [ be32, 0x0211E05C, 0xF86102F0 ]
-          - [ be32, 0x0211E060, 0x80A102F4 ]
-          - [ be32, 0x0211E064, 0x3C80FA81 ]
-          - [ be32, 0x0211E068, 0x60840000 ]
-          - [ be32, 0x0211E06C, 0x78840020 ]
-          - [ be32, 0x0211E070, 0x788407C6 ]
-          - [ be32, 0x0211E074, 0x7C842B78 ]
-          - [ be32, 0x0211E078, 0x38610070 ]
-          - [ be32, 0x0211E07C, 0x4BD840E5 ]
-          - [ be32, 0x0211E080, 0x80A10080 ]
-          - [ be32, 0x0211E084, 0x3C80FA81 ]
+          - [ be32, 0x0211E038, 0xF8010060 ]
+          - [ be32, 0x0211E03C, 0x80A105B0 ]
+          - [ be32, 0x0211E040, 0x2C050017 ]
+          - [ be32, 0x0211E044, 0x4182000C ]
+          - [ be32, 0x0211E048, 0x2C050005 ]
+          - [ be32, 0x0211E04C, 0x40820054 ]
+          - [ be32, 0x0211E050, 0x80A105B0 ]
+          - [ be32, 0x0211E054, 0x3C80FA82 ]
+          - [ be32, 0x0211E058, 0x60840000 ]
+          - [ be32, 0x0211E05C, 0x78840020 ]
+          - [ be32, 0x0211E060, 0x788407C6 ]
+          - [ be32, 0x0211E064, 0x7C842B78 ]
+          - [ be32, 0x0211E068, 0x38610030 ]
+          - [ be32, 0x0211E06C, 0x4BD840F5 ]
+          - [ be32, 0x0211E070, 0x38600003 ]
+          - [ be32, 0x0211E074, 0x38800002 ]
+          - [ be32, 0x0211E078, 0x38A0FFFF ]
+          - [ be32, 0x0211E07C, 0x4BD839E5 ]
+          - [ be32, 0x0211E080, 0x7C651B78 ]
+          - [ be32, 0x0211E084, 0x3C80FA82 ]
           - [ be32, 0x0211E088, 0x60840001 ]
           - [ be32, 0x0211E08C, 0x78840020 ]
           - [ be32, 0x0211E090, 0x788407C6 ]
           - [ be32, 0x0211E094, 0x7C842B78 ]
-          - [ be32, 0x0211E098, 0x38610070 ]
+          - [ be32, 0x0211E098, 0x38610030 ]
           - [ be32, 0x0211E09C, 0x4BD840C5 ]
-          - [ be32, 0x0211E0A0, 0x80A10084 ]
-          - [ be32, 0x0211E0A4, 0x3C80FA81 ]
-          - [ be32, 0x0211E0A8, 0x60840002 ]
-          - [ be32, 0x0211E0AC, 0x78840020 ]
-          - [ be32, 0x0211E0B0, 0x788407C6 ]
-          - [ be32, 0x0211E0B4, 0x7C842B78 ]
-          - [ be32, 0x0211E0B8, 0x38610070 ]
-          - [ be32, 0x0211E0BC, 0x4BD840A5 ]
-          - [ be32, 0x0211E0C0, 0xE86102F0 ]
-          - [ be32, 0x0211E0C4, 0x7C6307B4 ]
-          - [ be32, 0x0211E0C8, 0x2C030000 ]
-          - [ be32, 0x0211E0CC, 0x41800038 ]
-          - [ be32, 0x0211E0D0, 0x3C600257 ]
-          - [ be32, 0x0211E0D4, 0x8063A370 ]
-          - [ be32, 0x0211E0D8, 0x2C030000 ]
-          - [ be32, 0x0211E0DC, 0x41820028 ]
-          - [ be32, 0x0211E0E0, 0x38630008 ]
-          - [ be32, 0x0211E0E4, 0x38810080 ]
-          - [ be32, 0x0211E0E8, 0x3CA00211 ]
-          - [ be32, 0x0211E0EC, 0x60A5E118 ]
-          - [ be32, 0x0211E0F0, 0x3D000211 ]
-          - [ be32, 0x0211E0F4, 0x6108E148 ]
-          - [ be32, 0x0211E0F8, 0x38C00000 ]
-          - [ be32, 0x0211E0FC, 0x38E00000 ]
-          - [ be32, 0x0211E100, 0x4B52B0B5 ]
-          - [ be32, 0x0211E104, 0xE8010310 ]
-          - [ be32, 0x0211E108, 0x7C0803A6 ]
-          - [ be32, 0x0211E10C, 0x38210300 ]
-          - [ be32, 0x0211E110, 0x38600004 ]
-          - [ be32, 0x0211E114, 0x4E800020 ]
-          - [ be32, 0x0211E118, 0x46494641 ]
-          - [ be32, 0x0211E11C, 0x20313720 ]
-          - [ be32, 0x0211E120, 0x2D207A61 ]
-          - [ be32, 0x0211E124, 0x70726173 ]
-          - [ be32, 0x0211E128, 0x7A616D20 ]
-          - [ be32, 0x0211E12C, 0x6E61206D ]
-          - [ be32, 0x0211E130, 0x65637A20 ]
-          - [ be32, 0x0211E134, 0x284F6E6C ]
-          - [ be32, 0x0211E138, 0x696E6520 ]
-          - [ be32, 0x0211E13C, 0x46726965 ]
-          - [ be32, 0x0211E140, 0x6E646C69 ]
-          - [ be32, 0x0211E144, 0x65732900 ]
-          - [ be32, 0x0211E148, 0x46494641 ]
-          - [ be32, 0x0211E14C, 0x20313720 ]
-          - [ be32, 0x0211E150, 0x4F6E6C69 ]
-          - [ be32, 0x0211E154, 0x6E652046 ]
-          - [ be32, 0x0211E158, 0x7269656E ]
-          - [ be32, 0x0211E15C, 0x646C6965 ]
-          - [ be32, 0x0211E160, 0x73000000 ]
+          - [ be32, 0x0211E0A0, 0xE8010060 ]
+          - [ be32, 0x0211E0A4, 0x7C0803A6 ]
+          - [ be32, 0x0211E0A8, 0x38210050 ]
+          - [ be32, 0x0211E0AC, 0x80610560 ]
+          - [ be32, 0x0211E0B0, 0x4E800020 ]
+          - [ be32, 0x0211E0C0, 0xF821FD01 ]
+          - [ be32, 0x0211E0C4, 0x7C0802A6 ]
+          - [ be32, 0x0211E0C8, 0xF8010310 ]
+          - [ be32, 0x0211E0CC, 0x38600000 ]
+          - [ be32, 0x0211E0D0, 0x90610080 ]
+          - [ be32, 0x0211E0D4, 0x90610084 ]
+          - [ be32, 0x0211E0D8, 0x38600000 ]
+          - [ be32, 0x0211E0DC, 0x38810080 ]
+          - [ be32, 0x0211E0E0, 0x38A10160 ]
+          - [ be32, 0x0211E0E4, 0x38C00000 ]
+          - [ be32, 0x0211E0E8, 0x4BD83631 ]
+          - [ be32, 0x0211E0EC, 0xF86102F0 ]
+          - [ be32, 0x0211E0F0, 0x80A102F4 ]
+          - [ be32, 0x0211E0F4, 0x3C80FA81 ]
+          - [ be32, 0x0211E0F8, 0x60840000 ]
+          - [ be32, 0x0211E0FC, 0x78840020 ]
+          - [ be32, 0x0211E100, 0x788407C6 ]
+          - [ be32, 0x0211E104, 0x7C842B78 ]
+          - [ be32, 0x0211E108, 0x38610070 ]
+          - [ be32, 0x0211E10C, 0x4BD84055 ]
+          - [ be32, 0x0211E110, 0x80A10080 ]
+          - [ be32, 0x0211E114, 0x3C80FA81 ]
+          - [ be32, 0x0211E118, 0x60840001 ]
+          - [ be32, 0x0211E11C, 0x78840020 ]
+          - [ be32, 0x0211E120, 0x788407C6 ]
+          - [ be32, 0x0211E124, 0x7C842B78 ]
+          - [ be32, 0x0211E128, 0x38610070 ]
+          - [ be32, 0x0211E12C, 0x4BD84035 ]
+          - [ be32, 0x0211E130, 0x80A10084 ]
+          - [ be32, 0x0211E134, 0x3C80FA81 ]
+          - [ be32, 0x0211E138, 0x60840002 ]
+          - [ be32, 0x0211E13C, 0x78840020 ]
+          - [ be32, 0x0211E140, 0x788407C6 ]
+          - [ be32, 0x0211E144, 0x7C842B78 ]
+          - [ be32, 0x0211E148, 0x38610070 ]
+          - [ be32, 0x0211E14C, 0x4BD84015 ]
+          - [ be32, 0x0211E150, 0xE86102F0 ]
+          - [ be32, 0x0211E154, 0x7C6307B4 ]
+          - [ be32, 0x0211E158, 0x2C030000 ]
+          - [ be32, 0x0211E15C, 0x41800038 ]
+          - [ be32, 0x0211E160, 0x3C600257 ]
+          - [ be32, 0x0211E164, 0x8063A370 ]
+          - [ be32, 0x0211E168, 0x2C030000 ]
+          - [ be32, 0x0211E16C, 0x41820028 ]
+          - [ be32, 0x0211E170, 0x38630008 ]
+          - [ be32, 0x0211E174, 0x38810080 ]
+          - [ be32, 0x0211E178, 0x3CA00211 ]
+          - [ be32, 0x0211E17C, 0x60A5E1A8 ]
+          - [ be32, 0x0211E180, 0x3D000211 ]
+          - [ be32, 0x0211E184, 0x6108E1D8 ]
+          - [ be32, 0x0211E188, 0x38C00000 ]
+          - [ be32, 0x0211E18C, 0x38E00000 ]
+          - [ be32, 0x0211E190, 0x4B52B025 ]
+          - [ be32, 0x0211E194, 0xE8010310 ]
+          - [ be32, 0x0211E198, 0x7C0803A6 ]
+          - [ be32, 0x0211E19C, 0x38210300 ]
+          - [ be32, 0x0211E1A0, 0x38600004 ]
+          - [ be32, 0x0211E1A4, 0x4E800020 ]
+          - [ be32, 0x0211E1A8, 0x46494641 ]
+          - [ be32, 0x0211E1AC, 0x20313720 ]
+          - [ be32, 0x0211E1B0, 0x2D207A61 ]
+          - [ be32, 0x0211E1B4, 0x70726173 ]
+          - [ be32, 0x0211E1B8, 0x7A616D20 ]
+          - [ be32, 0x0211E1BC, 0x6E61206D ]
+          - [ be32, 0x0211E1C0, 0x65637A20 ]
+          - [ be32, 0x0211E1C4, 0x284F6E6C ]
+          - [ be32, 0x0211E1C8, 0x696E6520 ]
+          - [ be32, 0x0211E1CC, 0x46726965 ]
+          - [ be32, 0x0211E1D0, 0x6E646C69 ]
+          - [ be32, 0x0211E1D4, 0x65732900 ]
+          - [ be32, 0x0211E1D8, 0x46494641 ]
+          - [ be32, 0x0211E1DC, 0x20313720 ]
+          - [ be32, 0x0211E1E0, 0x6D65637A ]
+          - [ be32, 0x0211E1E4, 0x00000000 ]
