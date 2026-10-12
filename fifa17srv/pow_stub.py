@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import socket
 
+from . import easw
 from .config import Config
 from .server import Capture
 
@@ -62,6 +63,17 @@ def handle(conn: socket.socket, addr, cfg: Config, label: str = "pow") -> None:
                 cap.note(f"  naglowek {name.strip()}: {val.strip()[:300]}")
             if body:
                 cap.note(f"  cialo ({len(body)}B): {body[:600]!r}")
+            parts = lines[0].split(" ")
+            target = parts[1] if len(parts) > 1 else "/"
+            if cfg.serve_easw_config and target.startswith(easw.BASE_PATH):
+                # SportsWorld (EASW): prawdziwa atrapa, nie sam rejestrator -- patrz easw.py
+                hdrs = {h.split(":", 1)[0].strip().lower(): h.split(":", 1)[1].strip()
+                        for h in lines[1:] if ":" in h}
+                status, out_headers, payload, what = easw.handle_request(
+                    parts[0], target, hdrs, body, addr[0] if addr else "")
+                conn.sendall(easw.render_http(status, out_headers, payload))
+                cap.note(f"{label} odpowiedz: {what}")
+                break
             payload = b"{}"
             resp = (b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                     + f"Content-Length: {len(payload)}\r\n".encode()

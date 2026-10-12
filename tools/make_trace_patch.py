@@ -54,18 +54,13 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rpcs3_patch_trac
 TARGETS = [
     (0x01, "EVT  post_event(this, nazwa_zdarzenia, dane)", 0x015FFB68, 0x01955538, 6),
     (0x10, "adaptor SendGameInvite (UI -> C++)", 0x016491B4, 0x01955530, 3),
-    (0x12, "ginv::SendGameInvite", 0x00301AD4, 0x01955528, 3),
-    (0x13, "Invitations op ctor (SendGameInvite)", 0x003019A4, 0x0195552C, 3),
-    (0x14, "puid: LookupPlatformUserId start", 0x002CD938, 0x01955530, 3),
     (0x15, "puid: wynik wyszukiwania (30262c)", 0x0030262C, 0x0195552C, 3),
     (0x16, "NP: ostatni krok przed sceNpBasicSendMessageGui (302454)", 0x00302454, 0x01955538, 3),
     (0x20, "createGame: callback sukcesu 'GSMR' (2dee08)", 0x002DEE08, 0x0195552C, 3),
     (0x30, "NP: handler zdarzen basic (zaproszenia/wiadomosci)", 0x00AE0C04, 0x01955534, 3),
-    (0x31, "NP: callback managera", 0x00ADF1DC, 0x01955538, 3),
-    (0x40, "SportsWorld: ConnectToSportsWorld", 0x00309388, 0x01955538, 3),
     (0x41, "SportsWorld: LoadSportsWorldUserPresence", 0x0030F2F0, 0x01955534, 3),
     (0x43, "SportsWorld: LoadSportsWorldUsers", 0x00311FDC, 0x01955538, 3),
-    # --- runda 2 (znaczniki 0x53, 0x56-0x5A, 0x5F, 0x60, 0x62 usuniete: potwierdzone, ze ta sciezka nie jest uzywana) ---
+    # --- runda 2 (znaczniki 0x53, 0x56-0x5A, 0x5F, 0x60, 0x62, 0x73-0x75, 0x79 usuniete: ta sciezka nie jest uzywana; 0x12-0x14, 0x31 - lancuch potwierdzony) ---
     (0x50, "OSDK trace(kategoria 4cc, zdarzenie 4cc)", 0x002E8448, 0x01955538, 3),
     (0x51, "GameSessionManager::createGame(parametry, listener)", 0x0028EFA4, 0x01955510, 3),
     (0x52, "CreateGame op: konstruktor", 0x0028E208, 0x01955518, 3),
@@ -81,13 +76,9 @@ TARGETS = [
     # --- runda 3: kto wola createGame i jaki listener dostaje wynik; wywolania silnik -> skrypty UI ---
     (0x71, "UI skrypt: wywolanie funkcji 'Handle_<nazwa>' (napisy) (38aca4)", 0x0038ACA4, 0x01955538, 7),
     (0x72, "UI skrypt: wywolanie funkcji 'Handle_<nazwa>' (obiekt) (38b110)", 0x0038B110, 0x01955538, 7),
-    (0x73, "gses: wynik operacji 2df808", 0x002DF808, 0x01955538, 3),
-    (0x74, "gses: wynik operacji 2df978", 0x002DF978, 0x01955540, 3),
-    (0x75, "gses: wynik operacji 2dfb20", 0x002DFB20, 0x01955540, 3),
     (0x76, "EVENT_GAME_INVITE_RECEIVED: nadawca zdarzenia (1649774)", 0x01649774, 0x01955544, 3),
     (0x77, "listener zaproszen: USER_INVITE sukces (16495b4)", 0x016495B4, 0x01955540, 3),
     (0x78, "listener zaproszen: USER_INVITE porazka (164964c)", 0x0164964C, 0x01955540, 3),
-    (0x79, "EVENT_MATCHUP_SUCCESS: nadawca zdarzenia (1625504)", 0x01625504, 0x0195553C, 3),
     (0x7E, "GameSessionManager::joinGame (290b18)", 0x00290B18, 0x0195552C, 3),
     (0x7F, "GameSessionManager::joinGame, wariant (290dd8)", 0x00290DD8, 0x0195552C, 3),
     # --- runda 5: odbior zaproszenia po stronie kolegi (zdarzenie NP 14 -> dane zaproszenia -> InviteHandler -> joinGame) ---
@@ -140,6 +131,19 @@ EXP_SUBJECT_MAX, EXP_TEXT_MAX = 18, 512
 assert 0 < len(EXP_SUBJECT) <= EXP_SUBJECT_MAX and 0 < len(EXP_TEXT) <= EXP_TEXT_MAX
 EXP_LOG_ID = 0x81                    # znacznik: k=0 wynik GetFriendPresenceByIndex, k=1/2 pierwsze 8 znakow nazwy, k=3 adaptor
 
+# ---------------------------------------------------------------- SportsWorld: wczytaj adresy uslugi przed polaczeniem
+# Klient czyta adresy OSDK_EASW_*_URL z konfiguracji RAZ, w "enable" modulu SportsWorld (0x30edc4 -> 0x30eb10), wywolywanym
+# przy polaczeniu z Blaze -- czyli zanim dojda odpowiedzi fetchClientConfig z kluczami. Wtedy bufory adresow zostaja puste
+# (spwd+0x500 = AUTH, +0x540 = REQ, ...), a kazde ConnectToSportsWorld konczy sie bledem "disconnect".
+# Ten wpis podpina sie pod wejscie ConnectToSportsWorld (0x309388, drugie slowo prologu) i, jesli bufor AUTH jest pusty,
+# wola metode "enable" (vtable spwd 0x2058060 + 0xbc) jeszcze raz -- konfiguracja jest wtedy juz kompletna.
+SW_NAME = "FIFA SportsWorld - wczytaj adresy uslugi przed polaczeniem"
+SW_AT = 0x0030938C                   # T+4 funkcji 0x309388 (`bl _savegpr`); r3 = obiekt spwd
+SW_HELPER = 0x01955538               # _savegpr, do ktorego oryginal skacze z T+4
+SW_OFF_AUTH = 0x500                  # spwd+0x500: bufor OSDK_EASW_AUTH_URL (0x40 B, wyzerowany w konstruktorze 0x30ae1c)
+SW_VT_ENABLE = 0xBC                  # *(spwd)+0xbc -> OPD -> 0x30edc4 (enable: stan=1 + 0x30eb10 czyta konfiguracje)
+SW_LOG_ID = 0x8A                     # znacznik: k=0 pierwszy bajt bufora AUTH po ponownym wczytaniu (0 = nadal brak klucza)
+
 RCV_AT = 0x00AE0208                  # `lwz r3,0x560(r1)` w 0xae01a4 -- wykonywane tylko po udanym sceNpBasicGetEvent
 RCV_DISPLACED = 0x80610560           # lwz r3,0x560(r1)
 RCV_FN_RECV = 0x01EA1A60             # import sceNpBasicRecvMessageCustom(mainType, options, container)
@@ -158,6 +162,7 @@ def stdu(rs, d, ra): return _ds(62, rs, ra, d, 1)
 def ld(rd, d, ra): return _ds(58, rd, ra, d, 0)
 def lwz(rd, d, ra): return (32 << 26) | (rd << 21) | (ra << 16) | (d & 0xFFFF)
 def stw(rs, d, ra): return (36 << 26) | (rs << 21) | (ra << 16) | (d & 0xFFFF)
+def lbz(rd, d, ra): return (34 << 26) | (rd << 21) | (ra << 16) | (d & 0xFFFF)
 def extsw(ra, rs): return (31 << 26) | (rs << 21) | (ra << 16) | (986 << 1)
 def cmpwi(ra, imm): return (11 << 26) | (0 << 23) | (ra << 16) | (imm & 0xFFFF)   # cmpwi cr0, ra, imm
 def stfd(fr, d, ra): return (54 << 26) | (fr << 21) | (ra << 16) | (d & 0xFFFF)
@@ -350,6 +355,44 @@ RCV_FRAME = 0x50
 RCV_OFF_RTC = 0x30
 
 
+SW_FRAME = 0x90
+SW_OFF_R0, SW_OFF_R3, SW_OFF_R4, SW_OFF_LR, SW_OFF_RTC = 0x70, 0x78, 0x80, 0x88, 0x40
+
+
+def build_sw_stub(base):
+    """Wejscie przez `bl` z SW_AT (zamiast `bl _savegpr`): r0 = LR wolajacego (po `mflr r0`), r3 = spwd, r4 = argument,
+    LR = SW_AT+4. Jesli bufor AUTH jest pusty, wola enable(spwd). Na koncu przywraca r0/r3/r4/LR i robi `b _savegpr`, czyli
+    oryginalna funkcja widzi dokladnie to samo, co bez patcha (r5-r12 sa ulotne; ConnectToSportsWorld ma 2 argumenty)."""
+    c = []
+    e = c.append
+    calls = []
+
+    def bl(target):
+        calls.append((len(c), target))
+        e(0)
+
+    e(mflr(12))
+    e(stdu(1, -SW_FRAME, 1))
+    e(std(0, SW_OFF_R0, 1)); e(std(3, SW_OFF_R3, 1)); e(std(4, SW_OFF_R4, 1)); e(std(12, SW_OFF_LR, 1))
+    e(lbz(5, SW_OFF_AUTH, 3))
+    e(cmpwi(5, 0)); idx_skip = len(c); e(0)               # bne skip
+    e(lwz(5, 0, 3)); e(lwz(5, SW_VT_ENABLE, 5)); e(lwz(5, 0, 5)); e(mtctr(5)); e(BCTRL)
+    e(ld(3, SW_OFF_R3, 1)); e(lbz(5, SW_OFF_AUTH, 3))     # po ponownym wczytaniu: pierwszy bajt AUTH (0 = brak klucza)
+    e(lis(4, 0xFA00 | SW_LOG_ID)); e(ori(4, 4, 0)); e(clrldi(4, 4, 32)); e(sldi(4, 4, 32)); e(or_(4, 4, 5))
+    e(addi(3, 1, SW_OFF_RTC))
+    bl(RTC_STUB)
+    idx_end = len(c)
+    e(ld(12, SW_OFF_LR, 1)); e(ld(4, SW_OFF_R4, 1)); e(ld(3, SW_OFF_R3, 1)); e(ld(0, SW_OFF_R0, 1))
+    e(addi(1, 1, SW_FRAME))
+    e(mtlr(12))
+    idx_b = len(c); e(0)
+    for idx, target in calls:
+        c[idx] = branch(base + 4 * idx, target, True)
+    c[idx_skip] = _bc_ne(base + 4 * idx_skip, base + 4 * idx_end)
+    c[idx_b] = branch(base + 4 * idx_b, SW_HELPER, False)
+    return c
+
+
 def build_rcv_stub(base):
     """Odbior zaproszenia (kolega). Wejscie przez `bl` z RCV_AT (LR = RCV_AT+4).
 
@@ -396,17 +439,26 @@ def build_rcv_stub(base):
     return c
 
 
+def build_sw():
+    """-> (slowa (adres, slowo), (adres_podmiany, slowo_bl, stub)) -- wpis SportsWorld (pierwszy w jaskini za sladami)."""
+    words, hooks, (commons, end) = build_all()
+    base = (end + 15) & ~15
+    sw = build_sw_stub(base)
+    assert base + 4 * len(sw) <= CAVE_END, hex(base + 4 * len(sw))
+    return [(base + 4 * i, w) for i, w in enumerate(sw)], (SW_AT, branch(SW_AT, base, True), base)
+
+
 def build_exp():
     """-> (slowa (adres, slowo), [(adres_podmiany, slowo_bl, stub), ...]) -- najpierw stub odbiorcy (RCV_AT), potem nadawcy
-    (EXP_AT); teksty zaproszenia stoja na samym koncu (ostatnie slowa nie sa instrukcjami)."""
-    words, hooks, (commons, end) = build_all()
+    (EXP_AT); teksty zaproszenia stoja na samym koncu (ostatnie slowa nie sa instrukcjami). Za stubem SportsWorld."""
+    sw_words, _sw_hook = build_sw()
+    end = sw_words[-1][0] + 4
     rbase = (end + 15) & ~15
     rw = build_rcv_stub(rbase)
     base = (rbase + 4 * len(rw) + 15) & ~15
-    sw = build_exp_stub(base)
-    assert base + 4 * len(sw) <= CAVE_END, hex(base + 4 * len(sw))
-    out = [(rbase + 4 * i, w) for i, w in enumerate(rw)] + [(base + 4 * i, w) for i, w in enumerate(sw)]
-    # wypelnienie do wyrownania miedzy stubami (zera sa juz w oryginale -- nie wpisujemy)
+    sw_ = build_exp_stub(base)
+    assert base + 4 * len(sw_) <= CAVE_END, hex(base + 4 * len(sw_))
+    out = [(rbase + 4 * i, w) for i, w in enumerate(rw)] + [(base + 4 * i, w) for i, w in enumerate(sw_)]
     return out, [(RCV_AT, branch(RCV_AT, rbase, True), rbase), (EXP_AT, branch(EXP_AT, base, True), base)]
 
 
@@ -488,6 +540,19 @@ def render_yaml():
         w("          - [ be32, 0x%08X, 0x%08X ]   # %s -> bl stub 0x%08X" % (at, bl_word, what, stub))
     for a, wd in exp_words:
         w("          - [ be32, 0x%08X, 0x%08X ]" % (a, wd))
+    sw_words, (sw_at, sw_bl, sw_stub) = build_sw()
+    w("")
+    w("  %s:" % SW_NAME)
+    w("    Games:")
+    w("      FIFA 17:")
+    w('        BLES02233: [ "01.00" ]')
+    w('    Author: "custom"')
+    w('    Notes: "Przed utworzeniem polaczenia SportsWorld wola ponownie enable modulu, jesli adresy OSDK_EASW_* nie zostaly jeszcze wczytane (konfiguracja z serwera przychodzi pozniej niz pierwszy odczyt)"')
+    w('    Patch Version: "1.0"')
+    w("    Patch:")
+    w("          - [ be32, 0x%08X, 0x%08X ]   # 0x30938c: bl _savegpr (ConnectToSportsWorld) -> bl stub 0x%08X" % (sw_at, sw_bl, sw_stub))
+    for a, wd in sw_words:
+        w("          - [ be32, 0x%08X, 0x%08X ]" % (a, wd))
     return "\n".join(out) + "\n"
 
 
@@ -566,6 +631,9 @@ class Emu:
         elif op == 32:
             ea = ((R[ra] if ra else 0) + self.s16(imm)) & M
             R[rd] = struct.unpack(">I", self.rd(ea, 4))[0]
+        elif op == 34:                                       # lbz
+            ea = ((R[ra] if ra else 0) + self.s16(imm)) & M
+            R[rd] = self.rd(ea, 1)[0]
         elif op == 36:                                       # stw
             ea = ((R[ra] if ra else 0) + self.s16(imm)) & M
             self.w(ea, struct.pack(">I", R[rd] & 0xFFFFFFFF))
@@ -695,7 +763,7 @@ def _yaml_check():
     doc = yaml.safe_load("%s:\n%s" % (PPU_HASH, render_yaml()))
     entries = doc[PPU_HASH]
     problems = []
-    for name in ("FIFA trace (zaproszenia i zdarzenia UI)", EXP_NAME):
+    for name in ("FIFA trace (zaproszenia i zdarzenia UI)", EXP_NAME, SW_NAME):
         e = entries.get(name)
         if not e or not e.get("Patch") or e["Games"]["FIFA 17"]["BLES02233"] != ["01.00"]:
             problems.append(name)
@@ -856,11 +924,66 @@ def _rcv_selftest():
     return ok_all
 
 
+def _sw_selftest():
+    """SportsWorld: gdy bufor AUTH pusty -> enable(spwd) wywolane raz (przez vtable+0xbc -> OPD -> kod) i zalogowany bajt
+    po ponownym wczytaniu; gdy niepusty -> nic. Zawsze: r0/r3/r4/r14-r31/r1 jak na wejsciu i skok `b _savegpr` z LR = SW_AT+4."""
+    rng = random.Random(4242)
+    sw_words, (at, bl_word, stub) = build_sw()
+    ok_all = True
+    spwd, vtab, opd, code_addr = 0x14BA46A8, 0x02058060, 0x024ACE90, 0x0030EDC4
+    for scenario in ("pusty_bufor_i_klucz_dotarl", "pusty_bufor_nadal_brak_klucza", "bufor_juz_wczytany"):
+        e = _fresh_emu(sw_words, rng)
+        e.w(at, struct.pack(">I", bl_word))
+        e.w(spwd, struct.pack(">I", vtab))
+        e.w(vtab + SW_VT_ENABLE, struct.pack(">I", opd))
+        e.w(opd, struct.pack(">I", code_addr))
+        auth = {"pusty_bufor_i_klucz_dotarl": 0, "pusty_bufor_nadal_brak_klucza": 0, "bufor_juz_wczytany": ord("h")}[scenario]
+        e.w(spwd + SW_OFF_AUTH, bytes([auth]))
+        calls, logged = [], []
+
+        def enable(emu):
+            calls.append(emu.r[3])
+            if scenario == "pusty_bufor_i_klucz_dotarl":
+                emu.w(spwd + SW_OFF_AUTH, b"h")              # po ponownym wczytaniu bufor ma adres
+            for n in list(range(4, 13)) + [0]:
+                emu.r[n] = rng.getrandbits(64)
+            emu.pc = emu.lr
+        e.hooks[code_addr] = enable
+        e.hooks[RTC_STUB] = _make_rtc(logged, rng)
+        e.hooks[SW_HELPER] = lambda emu: (_ for _ in ()).throw(StopIteration)
+        for n in list(range(14, 32)) + [11]:
+            e.r[n] = rng.getrandbits(64)
+        e.r[0] = rng.getrandbits(64)
+        e.r[3], e.r[4] = spwd, rng.getrandbits(64)
+        before = (list(e.r), e.cr)
+        e.lr = at + 4
+        e.pc = stub
+        try:
+            e.run(SW_HELPER)
+        except StopIteration:
+            pass
+        problems = []
+        want_calls = [] if scenario == "bufor_juz_wczytany" else [spwd]
+        if calls != want_calls: problems.append("enable %s" % calls)
+        want_log = [] if scenario == "bufor_juz_wczytany" else [
+            ((0xFA000000 | (SW_LOG_ID << 16) | 0) << 32) | (ord("h") if scenario == "pusty_bufor_i_klucz_dotarl" else 0)]
+        if logged != want_log: problems.append("log %s" % [hex(x) for x in logged])
+        if e.lr != at + 4: problems.append("lr=%x" % e.lr)
+        for n in [0, 1, 3, 4, 2] + list(range(14, 32)):
+            if e.r[n] != before[0][n]: problems.append("r%d" % n)
+        if (e.cr & 0x00FFF000) != (before[1] & 0x00FFF000): problems.append("cr2-4")
+        print("%-4s SportsWorld (%s): stub 0x%08X, %d slow %s" % (
+            "OK" if not problems else "BLAD", scenario, stub, len(sw_words), ",".join(problems)))
+        ok_all = ok_all and not problems
+    return ok_all
+
+
 def selftest():
     words, hooks, (commons, end) = build_all()
     exp_words, exp_hooks = build_exp()
+    sw_words, sw_hook = build_sw()
     n_text = (len(_exp_str(EXP_TEXT)) + len(_exp_str(EXP_SUBJECT))) // 4      # ostatnie slowa stuba to teksty, nie instrukcje
-    ok = _capstone_check(words + [(a, w) for a, w, *_ in hooks] + exp_words[:-n_text] + [(a_, b_) for a_, b_, _s in exp_hooks])
+    ok = _capstone_check(words + [(a, w) for a, w, *_ in hooks] + exp_words[:-n_text] + sw_words + [(a_, b_) for a_, b_, _s in exp_hooks] + [(sw_hook[0], sw_hook[1])])
     rng = random.Random(1234)
     for mid, name, target, helper, mode in TARGETS:
         logged = []
@@ -940,6 +1063,7 @@ def selftest():
         ok = ok and not problems
     ok = _exp_selftest() and ok
     ok = _rcv_selftest() and ok
+    ok = _sw_selftest() and ok
     ok = _yaml_check() and ok
     exp_end = exp_words[-1][0] + 4
     print("jaskinia: 0x%08X..0x%08X (%d bajtow, limit %d)" % (CAVE, exp_end, exp_end - CAVE, CAVE_END - CAVE))
@@ -978,11 +1102,19 @@ def verify_elf(path):
         if u32(at) != displaced:
             bad += 1
             print("NIEZGODNE 0x%02X %s 0x%08X: jest %08X, oczekiwano %08X" % (mid, name, at, u32(at), displaced))
+    w_sw = u32(SW_AT)
+    off_sw = w_sw & 0x03FFFFFC
+    if off_sw & 0x2000000:
+        off_sw -= 0x4000000
+    if not ((w_sw >> 26) == 18 and (w_sw & 3) == 1 and ((SW_AT + off_sw) & 0xFFFFFFFF) == SW_HELPER) or \
+            u32(SW_AT - 4) != 0x7C0802A6:
+        bad += 1
+        print("NIEZGODNE SportsWorld 0x%08X: %08X (oczekiwano bl 0x%08X po mflr r0)" % (SW_AT, w_sw, SW_HELPER))
     for at_, want_ in ((EXP_AT, EXP_DISPLACED), (RCV_AT, RCV_DISPLACED)):
         if u32(at_) != want_:
             bad += 1
             print("NIEZGODNE eksperyment 0x%08X: jest %08X, oczekiwano %08X" % (at_, u32(at_), want_))
-    for a, w in build_all()[0] + build_exp()[0]:      # jaskinia musi byc pusta (zera) w oryginale
+    for a, w in build_all()[0] + build_sw()[0] + build_exp()[0]:      # jaskinia musi byc pusta (zera) w oryginale
         if u32(a) != 0:
             bad += 1
             print("JASKINIA NIE JEST PUSTA @0x%08X: %08X" % (a, u32(a)))

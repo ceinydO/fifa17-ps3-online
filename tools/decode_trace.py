@@ -32,6 +32,7 @@ NAMES = {t[0]: t[1] for t in TARGETS}
 NAMES.update({t[0]: t[1] for t in MIDS})
 NAMES[0x81] = "eksperyment: natywne SendGameInvite"
 NAMES[0x82] = "eksperyment: odbior zaproszenia (sceNpBasicRecvMessageCustom)"
+NAMES[0x8A] = "SportsWorld: ponowne wczytanie adresow uslugi"
 MID_IDS = {t[0] for t in MIDS}
 LINE = re.compile(r"^\S+\s+(\d+):(\d\d):(\d\d)\.(\d+)\s+(?:\{([^}]*)\}\s+)?(.*)$")
 RTC = re.compile(r"cellRtcSetTime_t\(pDateTime=\*0x[0-9a-fA-F]+, iTime=0x([0-9a-fA-F]+)\)")
@@ -186,6 +187,11 @@ def main(argv):
             nm = b"".join(a.get(k, 0).to_bytes(4, "big") for k in (1, 2)).split(b"\0", 1)[0].decode("latin-1")
             print("%s INVITE-STUB sceNpBasicGetFriendPresenceByIndex(0) -> %s%s  nazwa znajomego='%s'" % (
                 head, "OK" if res == 0 else "BLAD 0x%08X" % res, "" if res == 0 else " (brak znajomego/RPCN?)", nm))
+            continue
+        if ev["id"] == 0x8A:
+            first = a.get(0, 0)
+            print("%s SW-ENABLE ConnectToSportsWorld: bufor adresu byl pusty -> enable ponownie; adres po wczytaniu: %s" % (
+                head, "JEST (pierwszy znak '%s')" % chr(first) if 32 <= first < 127 else "NADAL PUSTY (klucze OSDK_EASW_* nie dotarly do konfiguracji)"))
             continue
         if ev["id"] == 0x82:
             if 1 in a and 0 not in a:

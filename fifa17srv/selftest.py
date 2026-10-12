@@ -246,6 +246,106 @@ def _gamemgr_checks() -> None:
     gamemgr.reset()
 
 
+def _easw_checks(cfg: Config) -> None:
+    """Atrapa SportsWorld (easw.py): zachowanie sprawdzane tak, jak czyta je klient (logika z dezasemblacji EBOOT)."""
+    import xml.etree.ElementTree as ET
+    from . import blaze, easw, ids, pow_stub
+
+    def locale_allowed(setting: str, locale: str) -> bool:
+        """0x30905c: kolejne maski po przecinku (5-znakowy bufor, wymagana dlugosc 4), '*' pasuje do znaku."""
+        if len(locale) != 4:
+            return False
+        for tok in setting.split(",")[:4]:
+            if len(tok) != 4:
+                return False
+            if all(t == "*" or t == l for t, l in zip(tok, locale)):
+                return True
+        return False
+
+    def header_value(text: str, name: str):
+        """0x30f3a0: strstr(naglowki, "Nazwa: "), wartosc do CR."""
+        i = text.find(name)
+        if i < 0:
+            return None
+        j = text.find("\r", i + len(name))
+        return text[i + len(name):j] if j >= 0 else None
+
+    items = dict(easw.config_items("26.76.101.213", 8094))
+    check("easw: klucze konfiguracji sa komplet i krotsze niz bufory klienta (63 znaki)",
+          set(items) == {"OSDK_EASW_AUTH_URL", "OSDK_EASW_REQ_URL", "OSDK_EASW_MEDIA_URL", "OSDK_EASW_EVENT_URL",
+                         "OSDK_EASW_GF_FILE_URL", "OSDK_EASW_ALLOWED_LOCALES"}
+          and all(len(v) <= 63 for k, v in items.items() if k.endswith("_URL")))
+    check("easw: najdluzszy mozliwy adres (255.255.255.255:65535) miesci sie w buforze klienta",
+          len(easw.config_items("255.255.255.255", 65535)[0][1]) <= 63)
+    check("easw: domyslna wartosc klienta '----' odrzuca lokalizacje, nasza '****' przyjmuje kazda",
+          not locale_allowed("----", "enUS") and locale_allowed(easw.ALLOWED_LOCALES, "enUS")
+          and locale_allowed(easw.ALLOWED_LOCALES, "plPL"))
+    reply = blaze.build_client_config_reply(0x0009, 1, 7, "OSDK_CLIENT", False, "26.76.101.213",
+                                            easw.config_items("26.76.101.213", 8094))
+    check("easw: odpowiedz fetchClientConfig zawiera klucze OSDK_EASW_*", b"OSDK_EASW_ALLOWED_LOCALES" in reply
+          and b"OSDK_EASW_REQ_URL" in reply and b"http://26.76.101.213:8094/easw" in reply)
+
+    online = [{"name": "odyniec", "peer": "127.0.0.1"}, {"name": "odyniec1", "peer": "127.0.0.9"}]
+    easw.reset_state()
+    easw.PLAYERS_FN = lambda: list(online)
+    srv = Server("pow", "127.0.0.1", 0, lambda c, a: pow_stub.handle(c, a, cfg, "pow")).start()
+
+    def http(method, target, body=b""):
+        req = (f"{method} {target} HTTP/1.1\r\nHost: x\r\nUser-Agent: ProtoHttp 1.3/DS 15.1.1.0.0 (PlayStation3)\r\n"
+               f"Content-Length: {len(body)}\r\n\r\n").encode() + body
+        with socket.create_connection(("127.0.0.1", srv.port), timeout=5) as c:
+            c.sendall(req)
+            data = b""
+            while True:
+                chunk = c.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+        head, _, payload = data.partition(b"\r\n\r\n")
+        return head.decode("latin-1"), payload
+
+    try:
+        ticket = b"\x00\x01TICKET\x00odyniec1\x00\x00padding"
+        head, payload = http("POST", "/easw/authenticationPS3?version=v2&locale=enUS&skuid=1234", ticket)
+        tok = header_value(head, "EASW-Token: ")
+        uid = header_value(head, "EASW-Userid: ")
+        check("easw: authenticationPS3 -> 200 i naglowek EASW-Token (niepusty, do 0x400 znakow)",
+              head.startswith("HTTP/1.1 200") and bool(tok) and len(tok) < 0x400, head)
+        check("easw: EASW-Session, EASW-Nucleus-Persona i EASW-Userid sa w naglowkach i mieszcza sie w buforze 0x300 B",
+              bool(header_value(head, "EASW-Session: ")) and len(header_value(head, "EASW-Session: ")) < 0x44
+              and header_value(head, "EASW-Nucleus-Persona: ") == str(ids.persona_id_for("odyniec1"))
+              and len(head) < 0x300, head)
+        check("easw: gracz rozpoznany po nazwie w bilecie (najdluzsza nazwa wygrywa: odyniec1, nie odyniec)",
+              uid == str(ids.uid_for("odyniec1")), str(uid))
+        head2, _ = http("POST", "/easw/authenticationPS3?version=v2&locale=enUS&skuid=1234", b"nothing here")
+        check("easw: bez nazwy w bilecie gracz jest rozpoznany po adresie IP klienta",
+              header_value(head2, "EASW-Userid: ") == str(ids.uid_for("odyniec")), head2)
+
+        uid1 = ids.uid_for("odyniec1")
+        head3, body3 = http("GET", f"/easw/personas/{uid1}/buddies/1234;full")
+        root = ET.fromstring(body3)
+        handles = [b.findtext("handle") for b in root.findall("buddylist/buddy")]
+        check("easw: lista znajomych = XML buddies.buddylist.buddy.handle bez samego siebie",
+              head3.startswith("HTTP/1.1 200") and root.tag == "buddies" and handles == ["odyniec"], body3.decode())
+        head4, body4 = http("GET", f"/easw/personas/{uid1}/sku/1234/onlineStatus?handles=odyniec,nikt")
+        rows = {b.findtext("handle"): b.findtext("presence") for b in ET.fromstring(body4).findall("buddy")}
+        check("easw: obecnosc = XML addressbook.buddy {handle, presence}; polaczony ONLINE, nieznany OFFLINE",
+              ET.fromstring(body4).tag == "addressbook" and rows == {"odyniec": "ONLINE", "nikt": "OFFLINE"}, body4.decode())
+        online[:] = [online[1]]
+        _, body5 = http("GET", f"/easw/personas/{uid1}/buddies/1234;full")
+        check("easw: znajomy, ktory sie rozlaczyl, nadal jest na liscie (zapamietany po uwierzytelnieniu)",
+              [b.findtext("handle") for b in ET.fromstring(body5).findall("buddylist/buddy")] == ["odyniec"])
+        head6, body6 = http("GET", "/easw/personas/1/profile")
+        check("easw: nieznane zadanie -> 200 z pustym XML-em (nagrane), nie 400/401 (to wywolaloby ponowne logowanie)",
+              head6.startswith("HTTP/1.1 200") and body6 == b"<response></response>", head6)
+        head7, body7 = http("GET", "/fut/rs4/ut/game/fifa17/user/accountinfo")
+        check("easw: ruch FUT nadal obslugiwany jak dotad (200 {})", head7.startswith("HTTP/1.1 200") and body7 == b"{}")
+    finally:
+        srv.stop()
+        easw.PLAYERS_FN = None
+        easw.reset_state()
+
+
 def _trace_patch_checks() -> None:
     """tools/make_trace_patch.py: kodowanie + semantyka lat-znacznikow (emulator) i aktualnosc pliku YAML."""
     import contextlib
@@ -450,6 +550,7 @@ def run_selftest() -> int:
     check("TDF decoder rejects garbage without crashing", err is not None and fields == [])
 
     _gamemgr_checks()
+    _easw_checks(cfg)
 
     _trace_patch_checks()
 

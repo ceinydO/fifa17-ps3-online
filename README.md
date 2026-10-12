@@ -32,10 +32,12 @@ friend, the friend sees the invitation, accepts, both end up in the same Blaze g
   **receiving half**: the game only reacts to NP event 14 (`RECV_INVITATION_RESULT`) and the system event `0x151`, which
   RPCS3 never produces by itself; the new stub opens RPCS3's invitation list (`sceNpBasicRecvMessageCustom`) when event 5/23
   arrives, FIFA's own code then reads the 8-byte game id and joins. More trace markers on the accept path and `joinGame`.
-- Known blocker not addressed yet: after `createGame` the host UI goes `0x64 -> 0x63 -> 0x74 -> 0x65` within ~1.3 s while
-  the SportsWorld (EASW web service) ops fail because the server provides no `OSDK_EASW_*_URL` (the client even resolves
-  an empty host name). The SportsWorld friend list is probably what the real UI uses to pick the invitee, which would
-  explain why the UI script never sends the invitation.
+- **SportsWorld (EASW web service) is now emulated** (`fifa17srv/easw.py`, built from the EBOOT disassembly, not
+  yet run against the real client): after `createGame` the host UI went `0x64 -> 0x63 -> 0x74 -> 0x65` within ~1.3 s because
+  the SportsWorld ops (connect, friend list, presence) failed - the server gave no `OSDK_EASW_*` addresses. The same friend
+  list is what the real UI uses to pick the invitee, which explains why the UI script never called `SendGameInvite`.
+  Details in "Latest session ... SportsWorld" below. Host must update the server (`update_and_run.ps1`) and both PCs
+  must install the new `patch.yml` (6 entries now).
 - Operational finding: **the RPCN connection of RPCS3 drops ("connection reset by server") ~3.5-6 minutes after login**
   (round 4: 213 s and 216 s) and is never re-established. The RPCS3 "send invitation" list shows only *online* RPCN friends,
   so do the whole test within ~3 minutes of starting the game.
@@ -105,6 +107,41 @@ useless: `0x11`, `0x17`, `0x18`, `0x42`, `0x44`, `0x5F`, `0x60`, `0x62`. Cave: `
 **Unverified:** whether the invitation list shows up and FIFA's accept path (UI scripts included) reaches `joinGame` on the
 friend's PC; whether the lobby survives the SportsWorld failures once both players are in the game; whether the
 server's `joinGame` (never run against a real client) is accepted.
+
+### SportsWorld (EASW) - reverse engineering and the emulation added after round 4
+
+Why it matters: the lobby (`0x63`/`0x64`) starts three operations at once (`ConnectToSportsWorld` 0x309388,
+`LoadSportsWorldUsers` = friend list "EASW_FRIENDS" 0x311fdc -> `LoadSWFriends` 0x30cfd4, `LoadSportsWorldUserPresence`
+0x30f2f0 -> 0x30d118). All failed ("ServerError SportsWorld disconnect", and an empty `DnsHook` query) and the UI bounced.
+
+What the code does (module = component tag `spwd`, vtable `0x2058060`, state at `spwd+0xc038`, user id at `+0xc030`):
+- **Config** (read once by `0x30eb10`, called from "enable" `0x30edc4`, which the connection component `cncc` calls when Blaze
+  connects): `OSDK_EASW_AUTH_URL` -> `spwd+0x500`, `OSDK_EASW_REQ_URL` -> `+0x540`, `_MEDIA_URL`/`_EVENT_URL` (default = REQ)
+  -> `+0x580`/`+0x5c0`, `_GF_FILE_URL` -> `+0x600`, **each buffer is 0x40 bytes (<= 63 chars)**; `OSDK_EASW_ALLOWED_LOCALES`
+  (default `"----"` = **no locale allowed**: `0x30905c` makes every Connect fail locally before sending anything; the server must
+  send masks of 4 chars, `*` = any, e.g. `****`). A base-URL override via `DAT_0252ca94->vt+4` exists but is empty in our runs.
+- **Timing problem:** enable runs right after the Blaze connection, i.e. *before* the `fetchClientConfig` replies arrive, so
+  the buffers stay empty even if the server sends the keys. Therefore a second patch entry hooks the second word of
+  `ConnectToSportsWorld` (`0x30938c`): if `spwd+0x500` is empty it calls `enable` again (`vtable+0xbc` -> `0x30edc4`), then
+  continues unchanged. Marker `0x8A` logs the first byte of the AUTH buffer afterwards (0 = keys still missing).
+- **Connect:** `POST <AUTH>/authenticationPS3?version=v2&locale=<xxXX>&skuid=<n>` (body = PSN ticket, header
+  `EASW-Version: 2.0.5.0`). Success is read from the **response headers** (`0x30f3a0`, case-sensitive `strstr`, value ends at CR,
+  buffer 0x300 B): `EASW-Token: ` (required, <= 0x400), `EASW-Session: ` (<= 0x44), `EASW-Nucleus-Persona: ` (number),
+  `EASW-Userid: ` (decimal; becomes `%u` in every later path). Empty token = failure. HTTP 400 re-authenticates, 401 refreshes the
+  session (`0x30a104`), anything else fails - so unknown requests must answer 200.
+- **Requests** are signed (`EASW-Request-Signature`, `EASW-Content-Signature`, `0x30ffd8`); the server ignores the signatures.
+  Bodies are XML (`<?xml ... ?>`), `Content-Type: text/xml`; responses are parsed with DirtySDK `XmlFind`.
+- **Friend list:** `GET <REQ>/personas/<uid>/buddies/<sku>;full` -> XML path `buddies.buddylist.buddy`, each with `<handle>`
+  (<= 16 chars, looked up in the Blaze user manager `musr`; unknown handles are skipped) (`0x311db0`).
+- **Presence:** `GET <REQ>/personas/<uid>/sku/<sku>/onlineStatus?handles=a,b` -> `addressbook.buddy` with `<handle>` and
+  `<presence>` (text other than `OFFLINE` = online) (`0x31388c`).
+
+Server side (`fifa17srv/easw.py`, config switch `serve_easw_config`, default on): the `fetchClientConfig` reply carries the six
+keys (`http://<advertise host>:<pow_port>/easw`), `pow_stub.py` routes `/easw...` to the emulation (auth -> headers above, user
+recognised by the persona name inside the ticket, else by client IP; friend list = every other player the server has seen;
+presence = connected or not); every other request is answered `200 <response></response>` and **recorded** in
+`logs/captures/pow_*.txt` so the next test shows what else the client asks for. Selftest: real HTTP over loopback, the header
+parser and the locale rule reproduced from the disassembly.
 
 ## Session 2026-10-12 (round 3 results: the UI never asks for an invitation)
 
@@ -287,6 +324,9 @@ patch (`tools/rpcs3_patch_trace_invites.yml`) that logs when selected game funct
   results)". The experiment entry was renamed to **"FIFA eksperyment - zaproszenia (wyslij po createGame, odbierz liste
   zaproszen)"** (`install_trace_patch.py` still replaces any older entry by prefix). `--verify-elf` also checks the receiver
   hook site. Note: after each round the generated YAML must be re-installed on **both** PCs.
+  After the SportsWorld work the generated file has **three** entries (trace, invitations, SportsWorld pre-connect hook, ids `0x8A`);
+  trace markers `0x11`, `0x12`-`0x14`, `0x17`, `0x18`, `0x31`, `0x40`, `0x42`, `0x44`, `0x5F`, `0x60`, `0x62`, `0x73`-`0x75`, `0x79` were
+  removed to make room in the cave (`0x0211D810..0x0211E1B8` of `0x0211E200`); `0x40` is replaced by the SportsWorld stub itself.
 - Install on **both** PCs (the friend's side shows whether anything arrives). If the game does not start after enabling
   it, untick the patch in RPCS3's Patch Manager. The first launch after a patch change recompiles the PPU (minutes).
 

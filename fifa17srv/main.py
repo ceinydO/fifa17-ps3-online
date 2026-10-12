@@ -119,10 +119,10 @@ def cmd_run(args) -> int:
         pow_srvs.append(Server("ticker", cfg.bind_address, cfg.ticker_port,
                                lambda c, a: tcp_record.handle(c, a, cfg, "ticker")).start())
         print(f"  ticker     : {cfg.bind_address}:{cfg.ticker_port} (atrapa, nagrywa)")
-    if cfg.serve_pow_config or cfg.serve_fut_config:
+    if cfg.serve_pow_config or cfg.serve_fut_config or cfg.serve_easw_config:
         pow_srvs.append(Server("pow", cfg.bind_address, cfg.pow_port,
                                lambda c, a: pow_stub.handle(c, a, cfg, "pow")).start())
-        print(f"  web (POW/FUT): {cfg.bind_address}:{cfg.pow_port} (atrapa, nagrywa zadania)")
+        print(f"  web (POW/FUT/EASW): {cfg.bind_address}:{cfg.pow_port} (atrapa, nagrywa zadania; /easw = SportsWorld)")
     if cfg.serve_pow_config:
         pow_srvs.append(Server("pow-content", cfg.bind_address, cfg.pow_content_port,
                                lambda c, a: pow_stub.handle(c, a, cfg, "pow_content")).start())

@@ -32,7 +32,7 @@ import ssl
 import threading
 import time
 
-from . import gamemgr, gmtrace, ids, messaging, tdf, usersettings
+from . import easw, gamemgr, gmtrace, ids, messaging, tdf, usersettings
 from .config import Config
 from .qos import QOS_PORT
 from .server import Capture, negotiate
@@ -119,10 +119,20 @@ _PLAYERS_LOCK = threading.Lock()
 _PLAYERS: dict = {}   # nazwa persony -> {"stream", "send_lock", "ip", "port"}
 
 
-def _register_player(name: str, stream, send_lock: threading.Lock, identity=None, peer_ip: int = 0) -> None:
+def _register_player(name: str, stream, send_lock: threading.Lock, identity=None, peer_ip: int = 0,
+                     peer: str = "") -> None:
     with _PLAYERS_LOCK:
         _PLAYERS[name] = {"stream": stream, "send_lock": send_lock, "ip": 0, "port": 0, "maci": 0,
-                          "identity": identity, "peer_ip": peer_ip}
+                          "identity": identity, "peer_ip": peer_ip, "peer": peer}
+
+
+def _online_for_easw() -> list:
+    """Polaczeni gracze dla atrapy EASW (easw.py): nazwa + adres IP klienta (takze 127.0.0.1 hosta)."""
+    with _PLAYERS_LOCK:
+        return [{"name": n, "peer": e.get("peer", "")} for n, e in _PLAYERS.items()]
+
+
+easw.PLAYERS_FN = _online_for_easw
 
 
 def _peer_ip_u32(addr) -> int:
@@ -1028,6 +1038,8 @@ def handle(conn: socket.socket, addr, cfg: Config, ctx: ssl.SSLContext) -> None:
                         ]
                     if cfg.serve_fut_config:
                         extra_items += fut_config_items(cfg.blaze_advertise_host, cfg.pow_port)
+                    if cfg.serve_easw_config:
+                        extra_items += easw.config_items(cfg.blaze_advertise_host, cfg.pow_port)
                     resp = build_client_config_reply(component, command, msg_num, cfid, cfg.canary_hosts,
                                                       cfg.blaze_advertise_host, extra_items)
                     cap.note(f"-> wysylam fetchClientConfig CFID={cfid!r} (Reply, msg_num={msg_num})")
@@ -1046,7 +1058,7 @@ def handle(conn: socket.socket, addr, cfg: Config, ctx: ssl.SSLContext) -> None:
                     cap.note(f"-> wysylam LoginResponse [{cfg.login_groups or 'same flagi'}] (Reply, msg_num={msg_num}), "
                              f"{len(resp)-HDR_LEN}B payloadu")
                     identity = login_identity(fields)
-                    _register_player(identity[0], stream, send_lock, identity, _peer_ip_u32(addr))
+                    _register_player(identity[0], stream, send_lock, identity, _peer_ip_u32(addr), addr[0])
                     with _PLAYERS_LOCK:
                         cap.note(f"-> rejestr graczy po loginie {identity[0]!r}: {sorted(_PLAYERS)}")
                     if cfg.send_user_authenticated:

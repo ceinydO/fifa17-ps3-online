@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "rpcs3_patch_trace_invites.yml")
 KEY = "PPU-1243af2b292938038cdc3696755e82477122db3b"
 NAME = "FIFA trace (zaproszenia i zdarzenia UI):"
-OLD_PREFIXES = ("FIFA trace", "FIFA eksperyment")           # takze wpisy z wczesniejszych rund (inna nazwa eksperymentu)
+OLD_PREFIXES = ("FIFA trace", "FIFA eksperyment", "FIFA SportsWorld")           # takze wpisy z wczesniejszych rund (inna nazwa eksperymentu)
 
 
 def is_entry_header(body: str) -> bool:

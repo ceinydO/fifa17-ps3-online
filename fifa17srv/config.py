@@ -78,6 +78,9 @@ class Config:
     # Gdy serwer ich nie poda, modul FUT buduje zle adresy ("ut/game/fifa17/..." -> DNS 'ut', "/messages"
     # -> DNS '') i te zapytania koncza sie bledem. Z tym przelacznikiem wskazuja na atrape pod pow_port.
     serve_fut_config: bool = True
+    # SportsWorld / EASW (easw.py): klucze OSDK_EASW_* w fetchClientConfig i atrapa uslugi pod pow_port/easw. Bez tego
+    # operacje SportsWorld (lista znajomych, obecnosc) koncza sie bledem, a UI wraca z poczekalni do menu po ~1,3 s.
+    serve_easw_config: bool = True
     # Statystyki sezonowe (Play Season): grupy H2HSeasonalPlay / H2HPreviousSeasonalPlay / CoopSeasonalPlay_StatGroup
     # dostaja deskryptory statystyk i jeden wiersz wartosci dla gracza (EBOOT 0x507a84 sklada z nich dane sezonu;
     # z pustymi listami klient nie wysyla zdarzenia SeasonalPlayDownloadSuccess i ekran sezonu zostaje pusty).

@@ -5,10 +5,12 @@ Wynik rundy 4 (README, "Latest session: 2026-10-12 (round 4 results)"): natywny 
 i dochodzi do `sceNpBasicSendMessageGui`, ale RPCS3 odrzucil wiadomosc (`EXCEEDS_MAX`: temat mial 25 znakow, limit to 18) --
 wiec w obu kierunkach nie wyszlo zadne zaproszenie. Runda 5: temat poprawiony + **odbior po stronie kolegi** (gra sama nie otwiera
 listy zaproszen, bo w RPCS3 nie ma XMB) + wiecej znacznikow na sciezce przyjecia zaproszenia i `joinGame`.
+0. **Host (serwer):** `git pull` + `.\update_and_run.ps1` -- nowy serwer ma emulacje SportsWorld (w bannerze:
+   `web (POW/FUT/EASW)`; port 8094 musi byc otwarty w zaporze Windows takze dla kolegi). Wylaczenie: `"serve_easw_config": false`.
 1. **Oba komputery:** podmien `patches\patch.yml` (folder z `rpcs3.exe`, podfolder `patches`) plikiem od Claude'a (ten sam dla
-   obu; stary zachowaj jako `.bak`). W RPCS3: Patch Manager -> FIFA 17 -> BLES02233 -> **zaznacz wszystkie 5 wpisow**
-   (w tym "FIFA trace" i **"FIFA eksperyment - zaproszenia (wyslij po createGame, odbierz liste zaproszen)"**). Pierwszy start
-   po zmianie kompiluje PPU (kilka minut). Serwer (`update_and_run.ps1`) wlaczony wczesniej.
+   obu; stary zachowaj jako `.bak`). W RPCS3: Patch Manager -> FIFA 17 -> BLES02233 -> **zaznacz wszystkie 6 wpisow**
+   (w tym "FIFA trace", **"FIFA eksperyment - zaproszenia (wyslij po createGame, odbierz liste zaproszen)"** i
+   **"FIFA SportsWorld - wczytaj adresy uslugi przed polaczeniem"**). Pierwszy start po zmianie kompiluje PPU (kilka minut).
 2. **WAZNE - czas:** polaczenie RPCN pada ok. 3,5 min po logowaniu (start gry). Odpal gre na obu, **od razu** idz Online ->
    Online Friendlies i **zatrzymaj sie na ekranie ustawien** (kolega tez). Na tym ekranie czekajcie, az host bedzie gotowy.
    Jesli w ktoryms `RPCS3.log` pojawi sie `rpcn: Disconnected` PRZED zaproszeniem -- test niewazny, zacznijcie od nowa.
@@ -20,6 +22,9 @@ listy zaproszen, bo w RPCS3 nie ma XMB) + wiecej znacznikow na sciezce przyjecia
    (ekran FIFA z zaproszeniem / wchodzenie do lobby / blad). Zapiszcie jednym zdaniem, co widac na ekranie hosta i kolegi.
 5. Jesli nie wyszlo, host moze powtorzyc PLAY MATCH (max 2 razy). Zamknij gre normalnie, **skopiuj `RPCS3.log` zaraz po tescie**
    (obaj), host: `collect_logs.ps1`. Wyslij zip + oba logi + to jedno zdanie o ekranach.
+SportsWorld: po createGame ekran hosta NIE powinien juz wracac do menu po ~1 s -- zapisz, co widac (lobby? lista znajomych?).
+W logu serwera/zip: `logs/captures/pow_*.txt` (`EASW auth -> 200 persona=...`, `EASW znajomi ...`, `EASW (nieobslugiwane, nagrane) ...`).
+W `RPCS3.log` (decode_trace): `SW-ENABLE ... adres po wczytaniu: JEST` (albo `NADAL PUSTY` = klucze nie dotarly do konfiguracji).
 Odczyt: `python tools/decode_trace.py RPCS3.log --elf EBOOT.ELF`. Host: `INVITE-STUB ... OK`, `0x10`..`0x16`, w `RPCS3.log`
 `sceNpBasicSendMessageGui` BEZ bledu `failed with`, potem `0x77` (USER_INVITE sukces). Kolega: `0x30` z r3=23, `RECV-STUB
 zdarzenie NP 23`, `RECV-STUB ... -> 0x00000000`, `0x30` r3=14, `0x80`, `0x83`, `0x84`/`0x87`, `0x63`/`0x88`/`0x89`, `UI-SKRYPT
