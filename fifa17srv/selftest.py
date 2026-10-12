@@ -338,6 +338,10 @@ def _easw_checks(cfg: Config) -> None:
         head6, body6 = http("GET", "/easw/personas/1/profile")
         check("easw: nieznane zadanie -> 200 z pustym XML-em (nagrane), nie 400/401 (to wywolaloby ponowne logowanie)",
               head6.startswith("HTTP/1.1 200") and body6 == b"<response></response>", head6)
+        head8, body8 = http("GET", "/easw/sku/1234/configuration")
+        check("easw: konfiguracja gry -> XML sku_config.gameplay_triggers (pusta lista wyzwalaczy)",
+              head8.startswith("HTTP/1.1 200") and ET.fromstring(body8).tag == "sku_config"
+              and ET.fromstring(body8).find("gameplay_triggers") is not None, body8.decode())
         head7, body7 = http("GET", "/fut/rs4/ut/game/fifa17/user/accountinfo")
         check("easw: ruch FUT nadal obslugiwany jak dotad (200 {})", head7.startswith("HTTP/1.1 200") and body7 == b"{}")
     finally:

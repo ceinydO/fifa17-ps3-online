@@ -21,6 +21,7 @@ Wszystko ponizej wynika z dezasemblacji EBOOT (moduly 0x308ebc-0x3152a0; RE w RE
   w menedzerze uzytkownikow (0x311db0).
 * Obecnosc: GET <REQ>/personas/<uid>/sku/<sku>/onlineStatus?handles=a,b -> XML "addressbook.buddy" z <handle> i
   <presence> (tekst rozny od "OFFLINE" = online) (0x31388c).
+* Konfiguracja gry: GET <REQ>/sku/<sku>/configuration -> XML "sku_config.gameplay_triggers.trigger" (pusta lista).
 * Pozostale operacje (profil, awatary, nagrody, zdarzenia...) dostaja 200 z pustym XML-em i sa NAGRYWANE (plik
   pow_*.txt w logs/captures), zeby przy nastepnym tescie zobaczyc, o co jeszcze klient pyta.
 """
@@ -158,6 +159,7 @@ def presence_xml(handles: list) -> bytes:
 
 _RE_BUDDIES = re.compile(r"^/personas/(\d+)/buddies/")
 _RE_PRESENCE = re.compile(r"^/personas/(\d+)/sku/[^/]+/onlineStatus$")
+_RE_CONFIG = re.compile(r"^/sku/[^/]+/configuration$")
 
 
 def handle_request(method: str, target: str, headers: dict, body: bytes, peer: str):
@@ -179,6 +181,10 @@ def handle_request(method: str, target: str, headers: dict, body: bytes, peer: s
         handles = [h for h in raw.split(",") if h]
         payload = presence_xml(handles)
         return 200, [("Content-Type", "text/xml")], payload, f"EASW obecnosc {handles}: {payload[:200]!r}"
+    if _RE_CONFIG.match(path):
+        # LoadSportsWorldGameConfig (0x3114c0): sciezka "sku_config.gameplay_triggers.trigger" -- pusta lista wyzwalaczy
+        payload = b"<sku_config><gameplay_triggers></gameplay_triggers></sku_config>"
+        return 200, [("Content-Type", "text/xml")], payload, "EASW konfiguracja gry (pusta lista wyzwalaczy)"
     return 200, [("Content-Type", "text/xml")], b"<response></response>", \
         f"EASW (nieobslugiwane, nagrane) {method} {path}"
 
