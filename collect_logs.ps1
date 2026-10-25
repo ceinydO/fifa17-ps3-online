@@ -3,7 +3,7 @@
 # (logs\captures), stan drabinki (state\gm_variant.json), config.json oraz RPCS3.log i TTY.log tego komputera
 # (folder RPCS3: parametr -Rpcs3Dir, zmienna RPCS3_DIR, uruchomiony rpcs3.exe albo wyszukiwanie na dyskach/pulpicie).
 # Zamknij gre w RPCS3 przed uruchomieniem, zeby log byl kompletny. RPCS3.log kolegi dolacz osobno.
-param([string]$Rpcs3Dir = $env:RPCS3_DIR)
+param([Alias("Rcps3Dir", "RpcsDir")][string]$Rpcs3Dir = $env:RPCS3_DIR)
 Set-Location $PSScriptRoot
 
 function Find-Rpcs3Dir {
@@ -39,13 +39,18 @@ foreach ($f in @("state\gm_variant.json", "config.json")) {
     }
 }
 if (-not $Rpcs3Dir) { $Rpcs3Dir = Find-Rpcs3Dir }
-if ($Rpcs3Dir -and (Test-Path (Join-Path $Rpcs3Dir "RPCS3.log"))) {
+$rlog = $null
+if ($Rpcs3Dir -and (Test-Path $Rpcs3Dir)) {
+    # RPCS3.log lezy w folderze RPCS3 albo (nowsze wersje / inne ustawienia) w podfolderze, np. log\
+    $rlog = Get-ChildItem $Rpcs3Dir -Recurse -Depth 2 -Filter "RPCS3.log" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+}
+if ($rlog) {
     New-Item -ItemType Directory -Path (Join-Path $stage "rpcs3") -Force | Out-Null
-    foreach ($f in @("RPCS3.log", "TTY.log")) {
-        $src = Join-Path $Rpcs3Dir $f
-        if (Test-Path $src) { Copy-Item $src (Join-Path $stage "rpcs3") }
-    }
-    Write-Host "Dolaczono RPCS3.log z: $Rpcs3Dir"
+    Copy-Item $rlog.FullName (Join-Path $stage "rpcs3")
+    $tty = Join-Path $rlog.DirectoryName "TTY.log"
+    if (Test-Path $tty) { Copy-Item $tty (Join-Path $stage "rpcs3") }
+    Write-Host "Dolaczono RPCS3.log: $($rlog.FullName) (zmieniony $($rlog.LastWriteTime))"
 } else {
     Write-Host "UWAGA: nie znaleziono RPCS3.log -- podaj folder: .\collect_logs.ps1 -Rpcs3Dir ""C:\sciezka\do\rpcs3"""
 }
