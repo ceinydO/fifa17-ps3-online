@@ -165,10 +165,14 @@ def _gamemgr_checks() -> None:
     gs4 = T(setups(jo4, "guest")[0][2])
     check("poziom 5: dolaczajacy dostaje DLSC/JOIN i unikalny CONG",
           gs4["REAS"][1][0] == "DLSC" and sub(gs4["PROS"][1][1])["CONG"] == gcong != hcong)
+    g4 = sub(gs4["GAME"])
+    check("poziom 5: setup dolaczajacego (PRE_GAME) ma DHST z CONG hosta -- klient szuka hosta po DHST.CONG",
+          g4.get("GSTA") == gamemgr.STATE_PRE_GAME and "DHST" in g4 and sub(g4["DHST"]).get("CONG") == hcong
+          == sub(gs4["PROS"][1][0])["CONG"])
 
     # --- drabinka (auto): start od 1; po sukcesie wyzej; po pierwszej porazce raz cel; potem najlepszy dzialajacy
     gamemgr.reset()
-    cfgA = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmauto_"))
+    cfgA = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmauto_"), gm_variant=0)
     a1, *_ = gamemgr.create_game(cfgA, "host", req, ["guest"], lookup)
     check("auto: pierwsza proba = poziom 1", gamemgr.attempt_info(a1)[:2] == (1, "1-host-sam-stary"))
     gamemgr.finalize_game(cfgA, "host", [("GID ", tdf.VARINT, a1)], lookup)
@@ -222,7 +226,7 @@ def _gamemgr_checks() -> None:
     gamemgr.reset()
 
     # --- rozlaczenie klienta hosta w trakcie proby (crash/zamkniecie) NIE jest porazka ksztaltu: ten sam poziom wraca
-    cfgC = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmcrash_"))
+    cfgC = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gmcrash_"), gm_variant=0)
     c1, *_ = gamemgr.create_game(cfgC, "host", req, ["guest"], lookup)
     gamemgr.finalize_game(cfgC, "host", [("GID ", tdf.VARINT, c1)], lookup)         # poziom 1 OK
     c2, *_ = gamemgr.create_game(cfgC, "host", req, ["guest"], lookup)               # poziom 2

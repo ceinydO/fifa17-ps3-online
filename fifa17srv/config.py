@@ -45,7 +45,9 @@ class Config:
     #        state/gm_variant.json (przetrwa restart serwera; skasuj plik, zeby zaczac od nowa).
     #   1..5 = wymuszony poziom, -1 = uzyj pojedynczych przelacznikow gm_deferred_pregame/gm_faithful_flow/
     #        gm_host_initial_state z tego pliku.
-    gm_variant: int = 0
+    # Domyslnie 5: drabinka automatyczna (0) cofnela sie 2026-10-12 na poziom 3 przez falszywe "porazki" (proby hosta
+    # i kolegi przeplataly sie), a poziom 3 ma stary ksztalt REAS -- z nim kolega nie mogl dolaczyc.
+    gm_variant: int = 5
     # Po FINALIZE_WATCHDOG_SECONDS bez finalizeGameCreation hosta serwer usuwa gre (NotifyGameRemoved), zeby klient
     # wrocil z "please wait" i mozna bylo od razu ponowic (bez restartu RPCS3); kolejny createGame uzyje wlasciwego poziomu.
     gm_watchdog_remove: bool = True

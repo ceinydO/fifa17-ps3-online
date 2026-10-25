@@ -46,6 +46,23 @@ friend, the friend sees the invitation, accepts, both end up in the same Blaze g
 logs for analysis `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` (zip) + `RPCS3.log` of both players;
 selftest `python -m fifa17srv selftest`.
 
+## Latest session: 2026-10-25 (first real join: invitation delivered and accepted, joiner left, host crashed)
+
+After updating RPCS3 (the RPCN server moved to protocol 34; v0.0.42 builds expect 32 and log `Server returned protocol
+version: 34, expected: 32` -> no PSN -> "your Sony Entertainment Network account must be signed in", nothing reaches the server):
+- **SportsWorld emulation works**: auth, game config, friend list (`odyniec1` shown in "SELECT A FRIEND"), presence.
+- **The invitation chain works end to end**: host sent it, the friend's stub opened the RPCS3 list (event 23), accept ->
+  event 14 -> `0x83` read of the game id -> `NotifyInvitationStatus` -> `GameInviteValidation` -> `joinGame(GID=1)`
+  (`OSDK GBRS/JOIN`) -> server `joinGame` -> `NotifyGameSetup (DLSC/JOIN)` to the friend.
+- **Then the friend left after ~3 s** (`removePlayer REAS 7`, then GameManager command `0x16`) and the host's game
+  crashed (connection closed). Cause: the server was on ladder **level 3** (the auto ladder had demoted itself on 2026-10-12
+  because host and friend attempts interleaved and were scored as failures), and on levels 3-5 the host has a non-zero
+  CONG while the joiner's setup (state PRE_GAME) had **no `DHST`** - per the decompiled `isHost` logic the client then
+  finds no host endpoint at all.
+- **Fix (this commit):** `game_data` adds `DHST` = host info (with the host's CONG) whenever the host has a CONG;
+  `gm_variant` now defaults to **5** (fixed level, no auto ladder; `0` re-enables the ladder). The host's crash itself is
+  not analysed yet: the host's `RPCS3.log` was not in the upload.
+
 ## Latest session: 2026-10-12 (round 4 results: the chain runs, RPCS3 rejects our subject)
 
 **Test.** Round-4 patch (trace + experiment "send the invitation natively after createGame") on both PCs
