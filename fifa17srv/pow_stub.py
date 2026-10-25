@@ -48,8 +48,37 @@ def _read_request(conn: socket.socket, cap: Capture):
     return head.decode("latin-1"), body
 
 
+class _Quiet:
+    """Zastepcza 'Capture' na czas czytania zadania -- decyzje, czy logowac, podejmujemy dopiero po pierwszej linii."""
+
+    def data(self, *_a, **_k):
+        pass
+
+    def note(self, *_a, **_k):
+        pass
+
+    def close(self):
+        pass
+
+
+# Ile razy widzielismy dane zadanie (metoda + sciezka bez zapytania). Test 2026-10-25: gra odpytuje sklep POW
+# (GET /pow/store/game/fifa17/catalog/0/item/list) ~3600 razy w kilka minut, bo dostaje pusty JSON -- logowanie kazdego
+# zapytania zalewalo log serwera (2 MB) i tworzylo tysiace plikow w logs/captures. Pelny zapis: pierwsze LOG_FIRST
+# wystapienia, potem co LOG_EVERY-te jako jedna linia podsumowania.
+LOG_FIRST, LOG_EVERY = 3, 500
+_SEEN_REQ: dict = {}
+
+
+def _should_log(request_line: str):
+    parts = request_line.split(" ")
+    key = (parts[0], parts[1].split("?", 1)[0]) if len(parts) > 1 else (request_line, "")
+    n = _SEEN_REQ.get(key, 0) + 1
+    _SEEN_REQ[key] = n
+    return n <= LOG_FIRST or n % LOG_EVERY == 0, n
+
+
 def handle(conn: socket.socket, addr, cfg: Config, label: str = "pow") -> None:
-    cap = Capture(cfg, label, addr)
+    cap = _Quiet()
     try:
         conn.settimeout(10)
         while True:
@@ -57,6 +86,12 @@ def handle(conn: socket.socket, addr, cfg: Config, label: str = "pow") -> None:
             if head is None:
                 break
             lines = head.split("\r\n")
+            loud, count = _should_log(lines[0])
+            if loud:
+                cap = Capture(cfg, label, addr)
+                cap.data("C->S", head.encode("latin-1") + b"\r\n\r\n" + body)
+                if count > LOG_FIRST:
+                    cap.note(f"{label}: to samo zadanie juz {count} razy (logowane tylko co {LOG_EVERY}.)")
             cap.note(f"{label} zadanie: {lines[0]}")
             for h in lines[1:]:
                 name, _, val = h.partition(":")

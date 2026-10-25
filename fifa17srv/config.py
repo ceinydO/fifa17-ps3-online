@@ -45,9 +45,11 @@ class Config:
     #        state/gm_variant.json (przetrwa restart serwera; skasuj plik, zeby zaczac od nowa).
     #   1..5 = wymuszony poziom, -1 = uzyj pojedynczych przelacznikow gm_deferred_pregame/gm_faithful_flow/
     #        gm_host_initial_state z tego pliku.
-    # Domyslnie 5: drabinka automatyczna (0) cofnela sie 2026-10-12 na poziom 3 przez falszywe "porazki" (proby hosta
-    # i kolegi przeplataly sie), a poziom 3 ma stary ksztalt REAS -- z nim kolega nie mogl dolaczyc.
-    gm_variant: int = 5
+    # Domyslnie 1 (bez drabinki): jedyny poziom spojny dla OBU stron wg dekompilacji isHost (README, "How the client
+    # decides who is the host"): host BEZ CONG => w stanie PRE_GAME klucz hosta 0 (brak DHST) == punkt koncowy hosta,
+    # u hosta i u dolaczajacego (ktory ma wlasny, niezerowy CONG). Poziom 1 konczy createGame u hosta (finalize) od 10-11.
+    # Poziomy 3-5 (host z CONG): w PRE_GAME host przestaje byc hostem (2026-10-25: dolaczajacy wyszedl, host padl).
+    gm_variant: int = 1
     # Po FINALIZE_WATCHDOG_SECONDS bez finalizeGameCreation hosta serwer usuwa gre (NotifyGameRemoved), zeby klient
     # wrocil z "please wait" i mozna bylo od razu ponowic (bez restartu RPCS3); kolejny createGame uzyje wlasciwego poziomu.
     gm_watchdog_remove: bool = True

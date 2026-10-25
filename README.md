@@ -46,6 +46,20 @@ friend, the friend sees the invitation, accepts, both end up in the same Blaze g
 logs for analysis `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` (zip) + `RPCS3.log` of both players;
 selftest `python -m fifa17srv selftest`.
 
+## Latest session: 2026-10-25, second test (DHST broke the host; level 1 is the consistent shape)
+
+- Host invited the friend (RPCS3 send dialog, `USER_INVITE` success) but its own `createGame` never finished as host:
+  trace `0x5C onNetworkCreated` -> `0x20` success callback immediately, **no `finalizeGameCreation`** (the "isHost=false"
+  path). The only change was the new `DHST` in the host's INITIALIZING setup. The server watchdog removed the game after
+  14 s; the friend's `joinGame` 4 s later hit "unknown game". (The friend's own `createGame` with the same shape did
+  finalize - so DHST is not a reliable host marker either way.)
+- Fixes: `DHST` only in non-INITIALIZING setups; **default `gm_variant` = 1**: per the decompiled `isHost` rule the
+  host *without* CONG is the only shape that is consistent for both sides in PRE_GAME (host key 0 = host's roster
+  entry on the host and on the joiner; the joiner has its own non-zero CONG), and level 1 has finalized on the real host
+  since 2026-10-11.
+- Server log flood: the game polls `GET /pow/store/game/fifa17/catalog/0/item/list` ~3600 times in a few minutes
+  (answered `{}`); `pow_stub.py` now logs only the first 3 of each request path and then every 500th.
+
 ## Latest session: 2026-10-25 (first real join: invitation delivered and accepted, joiner left, host crashed)
 
 After updating RPCS3 (the RPCN server moved to protocol 34; v0.0.42 builds expect 32 and log `Server returned protocol

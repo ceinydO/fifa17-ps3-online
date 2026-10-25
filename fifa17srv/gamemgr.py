@@ -499,11 +499,13 @@ def game_data(game: dict, host: dict, state: int):
             ("VOIP", tdf.VARINT, echo.get("VOIP", 2)),
             ("VSTR", tdf.STRING, game["version"]),
         ]
-    if any(t == "CONG" for t, _typ, _v in hinfo):
+    if state != STATE_INITIALIZING and any(t == "CONG" for t, _typ, _v in hinfo):
         # Klient (0xc58c3c) bierze punkt koncowy hosta z THST tylko w stanie INITIALIZING; w kazdym innym stanie (np.
         # PRE_GAME, w ktorym dostaje gre dolaczajacy) klucz hosta = DHST.CONG, a brak DHST => klucz 0. Gdy host ma
         # niezerowy CONG (poziomy 3-5), bez DHST NIKT nie jest hostem: test 2026-10-25 -- kolega po joinGame dostal setup
         # PRE_GAME bez DHST, po ~3 s sam wyszedl z gry (removePlayer REAS 7), a host sie wywalil.
+        # NIE w setupie INITIALIZING hosta: test 2026-10-25 (drugi) -- z DHST host poziomu 5 nie uznal sie za hosta
+        # (onNetworkCreated od razu zakonczyl zadanie, bez finalizeGameCreation).
         fields.append(("DHST", tdf.STRUCT, hinfo))
     if echo.get("ATTR") is not None:
         fields.append(("ATTR", tdf.MAP, echo["ATTR"]))
