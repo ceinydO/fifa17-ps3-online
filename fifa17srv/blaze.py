@@ -27,10 +27,12 @@ odtwarza wzorzec `Fire2Frame::reply()` z grid-leak/blaze.
 from __future__ import annotations
 
 import hashlib
+import json
 import socket
 import ssl
 import threading
 import time
+from pathlib import Path
 
 from . import easw, gamemgr, gmtrace, ids, messaging, tdf, usersettings
 from .config import Config
@@ -324,35 +326,75 @@ def _persona_user_id(name: str) -> int:
     return ids.uid_for(name)
 
 
-def identity_for_persona(name: str, own_identity):
-    """Zwraca (nazwa, ext_id, blob, uid, persona_id) dla podanej nazwy persony -- jesli to wlasna
-    tozsamosc biezacej sesji, uzywa prawdziwych LOCAL_USER_ID/LOCAL_PERSONA_ID i EXTI/EXTB z loginu;
-    w przeciwnym razie generuje spojny, unikalny falszywy identyfikator (patrz _persona_user_id).
+# Prawdziwe EXTI/EXTB (NpId) person widzianych przy loginie -- takze po ich rozlaczeniu i po restarcie serwera
+# (state/known_players.json), zeby lookup gracza, ktory jeszcze nie jest polaczony, nie musial zgadywac.
+_KNOWN_LOCK = threading.Lock()
+_KNOWN: dict = {}            # nazwa persony -> (ext_id, blob)
+_KNOWN_PATH = None
 
-    UWAGA (crash po poprawce kolizji BlazeId): pierwsza wersja zwracala tu ext_id=0, blob=b"" dla
-    kazdej persony innej niz wlasna. To odblokowalo dawny problem (kolizja BlazeId -> rozlaczenie),
-    ale ujawnilo NOWY: PPU access violation na FEThread (czytanie adresu 0x90 -- niski, stale
-    przesuniecie typowe dla odczytu pola ze struktury spod pustego/null wskaznika). EXBB (EXTB z
-    loginu) to najwyrazniej struktura o ustalonym ksztalcie (np. NpId), ktora klient parsuje zakladajac
-    minimalny rozmiar; pusty blob (0 bajtow) daje wskaznik null/za krotki bufor, wiec odczyt pola w
-    stalym przesunieciu (tu akurat 0x90) pada. Serwer nie zna PRAWDZIWEGO EXTB/EXTI drugiego gracza
-    (kazde polaczenie jest obslugiwane osobno, bez wspoldzielonego stanu sesji), wiec jako
-    najbezpieczniejszy placeholder o poprawnym ksztalcie/rozmiarze uzywamy blobu/ext_id WLASNEJ
-    sesji (own_blob/own_ext_id) zamiast zera/pustego bajtow -- klient i tak juz poprawnie parsuje ten
-    ksztalt (bo to dokladnie to, co sam wyslal w swoim loginie), wiec nie powinien juz czytac poza
-    buforem, nawet jesli tresc semantycznie nie nalezy do szukanej persony."""
+
+def load_known_identities(path) -> None:
+    global _KNOWN_PATH
+    _KNOWN_PATH = path
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        loaded = {n: (int(v["ext"]), bytes.fromhex(v["blob"])) for n, v in data.items()}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return
+    with _KNOWN_LOCK:
+        _KNOWN.update(loaded)
+
+
+def remember_identity(identity) -> None:
+    name, ext_id, blob = identity
+    if not name or not blob:
+        return
+    with _KNOWN_LOCK:
+        if _KNOWN.get(name) == (ext_id, blob):
+            return
+        _KNOWN[name] = (ext_id, blob)
+        snapshot = {n: {"ext": e, "blob": b.hex()} for n, (e, b) in _KNOWN.items()}
+    if _KNOWN_PATH is None:
+        return
+    try:
+        Path(_KNOWN_PATH).parent.mkdir(parents=True, exist_ok=True)
+        Path(_KNOWN_PATH).write_text(json.dumps(snapshot, indent=1, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def synthetic_identity(name: str, own_blob: bytes):
+    """(ext_id, blob) dla persony, ktorej prawdziwego NpId serwer nie zna: blob w ksztalcie NpId (nazwa w pierwszych
+    16 bajtach, reszta zera, dlugosc jak wlasny blob klienta) i stabilne, sztuczne EXTI -- NIGDY tozsamosc pytajacego."""
+    size = max(len(own_blob or b""), 36)
+    blob = name.encode("utf-8")[:16].ljust(size, b"\0")
+    h = int(hashlib.sha1(f"ext:{name}".encode("utf-8")).hexdigest(), 16)
+    return 3000000000 + (h % 1000000000), blob
+
+
+def identity_for_persona(name: str, own_identity):
+    """Zwraca (nazwa, ext_id, blob, uid, persona_id) dla podanej nazwy persony: wlasna tozsamosc dla wlasnej nazwy,
+    prawdziwe EXTI/EXTB polaczonego gracza z rejestru, zapamietane z wczesniejszego loginu, a w ostatecznosci
+    sztuczne (synthetic_identity).
+
+    UWAGA (test 2026-10-31): wczesniej dla niepolaczonej persony oddawalismy EXTI/EXTB PYTAJACEGO (placeholder
+    "o poprawnym ksztalcie" po crashu przy pustym blobie). Klient dopasowuje uzytkownikow po NpId, wiec kolega,
+    ktory zalogowal sie pierwszy i zapytal o 'odyniec', uznal sie za 'odyniec' (jego Nucleus-Id w POW = BlazeId
+    hosta), a po joinGame usunal z gry gracza o BlazeId hosta (removePlayer REAS 7) -- serwer zamknal gre hosta.
+    Blob nigdy nie jest pusty (stary crash przy odczycie 0x90 z pustego bloba)."""
     own_name, own_ext_id, own_blob = own_identity
     uid = ids.uid_for(name)
     if name == own_name:
         return name, own_ext_id, own_blob, uid, ids.persona_id_for(name)
-    # Prawdziwy EXTI/EXTB (NpId) drugiego gracza znamy z jego loginu (rejestr) -- uzywamy go zamiast
-    # kopii wlasnego, jesli ten gracz jest polaczony.
     with _PLAYERS_LOCK:
         entry = _PLAYERS.get(name)
     real = entry.get("identity") if entry else None
     if real is not None:
         return name, real[1], real[2], uid, ids.persona_id_for(name)
-    return name, own_ext_id, own_blob, uid, ids.persona_id_for(name)
+    with _KNOWN_LOCK:
+        known = _KNOWN.get(name)
+    ext_id, blob = known if known else synthetic_identity(name, own_blob)
+    return name, ext_id, blob, uid, ids.persona_id_for(name)
 
 
 def build_user_identification(identity, uid: int = None, persona_id: int = None):
@@ -1058,6 +1100,7 @@ def handle(conn: socket.socket, addr, cfg: Config, ctx: ssl.SSLContext) -> None:
                     cap.note(f"-> wysylam LoginResponse [{cfg.login_groups or 'same flagi'}] (Reply, msg_num={msg_num}), "
                              f"{len(resp)-HDR_LEN}B payloadu")
                     identity = login_identity(fields)
+                    remember_identity(identity)
                     _register_player(identity[0], stream, send_lock, identity, _peer_ip_u32(addr), addr[0])
                     with _PLAYERS_LOCK:
                         cap.note(f"-> rejestr graczy po loginie {identity[0]!r}: {sorted(_PLAYERS)}")

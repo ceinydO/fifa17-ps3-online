@@ -90,6 +90,7 @@ def cmd_run(args) -> int:
     if args.no_chain:
         cfg.cert_send_chain = False
     ensure_certs(cfg)
+    blaze.load_known_identities(cfg.known_players_path)
     session_log = _setup_session_log(cfg)
     log = logging.getLogger("fifa17srv")
     log.info("wersja kodu: %s", _git_rev())

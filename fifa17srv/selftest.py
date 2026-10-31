@@ -250,6 +250,28 @@ def _gamemgr_checks() -> None:
     gamemgr.reset()
 
 
+def _identity_checks() -> None:
+    """Lookup persony, ktora nie jest polaczona, nie moze oddac NpId/EXTI pytajacego (test 2026-10-31: kolega uznal
+    sie za hosta i usunal go z gry)."""
+    from . import blaze
+    own = ("guest", 467641, b"guest".ljust(36, b"\0"))
+    saved_known, saved_path = dict(blaze._KNOWN), blaze._KNOWN_PATH
+    blaze._KNOWN.clear()
+    blaze._KNOWN_PATH = None
+    try:
+        n, ext, blob, uid, _pid = blaze.identity_for_persona("host", own)
+        check("lookup niepolaczonej persony: sztuczny NpId z jej nazwa, nigdy NpId/EXTI pytajacego",
+              n == "host" and ext != own[1] and blob != own[2] and blob.startswith(b"host\0") and len(blob) == 36,
+              f"ext={ext} blob={blob[:16]!r}")
+        blaze.remember_identity(("host", 464495, b"host".ljust(36, b"\0")))
+        _n, ext2, blob2, *_ = blaze.identity_for_persona("host", own)
+        check("lookup persony widzianej wczesniej: jej prawdziwe EXTI/EXTB z loginu", ext2 == 464495 and blob2[:4] == b"host")
+    finally:
+        blaze._KNOWN.clear()
+        blaze._KNOWN.update(saved_known)
+        blaze._KNOWN_PATH = saved_path
+
+
 def _easw_checks(cfg: Config) -> None:
     """Atrapa SportsWorld (easw.py): zachowanie sprawdzane tak, jak czyta je klient (logika z dezasemblacji EBOOT)."""
     import xml.etree.ElementTree as ET
@@ -558,6 +580,7 @@ def run_selftest() -> int:
     check("TDF decoder rejects garbage without crashing", err is not None and fields == [])
 
     _gamemgr_checks()
+    _identity_checks()
     _easw_checks(cfg)
 
     _trace_patch_checks()

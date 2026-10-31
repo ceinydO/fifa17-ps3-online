@@ -166,6 +166,10 @@ class Config:
     def gm_variant_path(self) -> Path:
         return ROOT / self.state_dir / "gm_variant.json"
 
+    @property
+    def known_players_path(self) -> Path:
+        return ROOT / self.state_dir / "known_players.json"
+
 
 def load_config() -> Config:
     cfg = Config()

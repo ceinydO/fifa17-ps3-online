@@ -46,6 +46,22 @@ friend, the friend sees the invitation, accepts, both end up in the same Blaze g
 logs for analysis `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` (zip) + `RPCS3.log` of both players;
 selftest `python -m fifa17srv selftest`.
 
+## Latest session: 2026-10-31 (invite accepted twice, the friend "removed the host")
+
+- Level 1 worked on the host (`finalizeGameCreation`); the invitation was delivered and accepted twice; the friend's
+  `joinGame` got `NotifyGameSetup (DLSC/JOIN)` - and ~2 s later the friend sent `removePlayer REAS 7` **with the host's
+  PID** (then `0x16` leaveGameByGroup), without ever starting the game network (no UDP bind on its side). The server
+  treated that as "host left" and removed the game.
+- **Cause (server bug):** the friend logged in first and its client immediately ran `lookupUsersByPersonaNames('odyniec')`.
+  The host was not connected yet, so `identity_for_persona` fell back to the **asker's own** EXTI/EXTB (NpId) under the
+  host's name and BlazeId (and sent it in `NotifyUserAdded` too). The client matches users by NpId, so it took
+  `odyniec`'s BlazeId as its own: its POW header `Easw-Session-Data-Nucleus-Id` already showed the host's id at 02:10:00,
+  13 s before the host logged in, and after the join it "left" as the host's player. (The 2026-10-25 runs show the
+  same id swap on the host whenever it logged in first - it may have contributed to those failures too.)
+- **Fix:** an unconnected persona now gets its real EXTI/EXTB remembered from an earlier login
+  (`state/known_players.json`, survives restarts) or, if never seen, a synthetic NpId-shaped blob with its own name and a
+  synthetic EXTI - never the asker's identity. Selftest checks both.
+
 ## Latest session: 2026-10-25, second test (DHST broke the host; level 1 is the consistent shape)
 
 - Host invited the friend (RPCS3 send dialog, `USER_INVITE` success) but its own `createGame` never finished as host:
