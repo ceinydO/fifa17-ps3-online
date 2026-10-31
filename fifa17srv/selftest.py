@@ -98,8 +98,11 @@ def _gamemgr_checks() -> None:
           and any(o[0] == "host" and o[1] == "NotifyPlayerJoining" for o in jouts))
     gst = T(gs[0][2])
     gp = [sub(x) for x in gst["PROS"][1]]
-    check("dolaczajacy: roster = host bez CONG + kolega z CONG (rozne klucze punktow koncowych), kolega w CONNECTING",
-          len(gp) == 2 and "CONG" not in gp[0] and gp[1]["CONG"] == gcong and gp[1]["STAT"] == 2
+    hcong = ids.connection_group_id_for("host")
+    gg = sub(gst["GAME"])
+    check("dolaczajacy (poziom 1): host z CONG i DHST.CONG = CONG hosta (klucz hosta w PRE_GAME), kolega z wlasnym "
+          "CONG w CONNECTING", len(gp) == 2 and gp[0].get("CONG") == hcong and gp[1]["CONG"] == gcong != hcong
+          and gp[1]["STAT"] == 2 and sub(gg["DHST"])["CONG"] == hcong and sub(gg["THST"])["CONG"] == hcong
           and gst["REAS"][1][0] == "DLSC" and gst["REAS"][1][2] == [("DCTX", tdf.VARINT, 1)])
     mesh = gamemgr.update_mesh_connection(
         cfg1, "guest", [("GID ", tdf.VARINT, gid), ("STAT", tdf.VARINT, 2),
@@ -247,6 +250,38 @@ def _gamemgr_checks() -> None:
     c5, *_ = gamemgr.create_game(cfgC, "host", req, ["guest"], lookup)
     check("stary plik stanu drabinki (bez wersji) jest ignorowany -- start od poziomu 1",
           gamemgr.attempt_info(c5)[0] == 1)
+    gamemgr.reset()
+
+
+def _level6_checks() -> None:
+    """Poziom 6 (domyslny od 2026-10-31): PRE_GAME, host z CONG + DHST u hosta i u dolaczajacego; po nieudanej
+    probie hosta (brak finalize) nastepny createGame tego hosta dostaje poziom 1."""
+    from . import gamemgr, ids
+    gamemgr.reset()
+    lookup = lambda n: {"identity": (n, 1000 + len(n), n.encode().ljust(36, b"\0")), "ip": 0x1A000001, "port": 3659,
+                        "maci": 0, "peer_ip": 0x1A000001}
+    T = lambda payload: {t: v for t, _ty, v in tdf.decode(payload[16:])}
+    sub = lambda v: {t: x for t, _ty, x in v}
+    req = [("GMCD", tdf.STRUCT, [("GNAM", tdf.STRING, "g")])]
+    cfg6 = Config(state_dir=tempfile.mkdtemp(prefix="fifa17srv_gm6_"), gm_variant=6)
+    hcong = ids.connection_group_id_for("host")
+    gid, _r, outs = gamemgr.create_game(cfg6, "host", req, ["guest"], lookup)
+    st = T([o for o in outs if o[0] == "host" and "NotifyGameSetup" in o[1]][0][2])
+    g, p0 = sub(st["GAME"]), sub(st["PROS"][1][0])
+    check("poziom 6: setup hosta PRE_GAME, host z CONG w rosterze, THST i DHST (ten sam klucz)",
+          g["GSTA"] == gamemgr.STATE_PRE_GAME and p0.get("CONG") == hcong and sub(g["THST"])["CONG"] == hcong
+          and sub(g["DHST"])["CONG"] == hcong)
+    _jr, jouts = gamemgr.join_game(cfg6, "guest", [("GID ", tdf.VARINT, gid)], lookup)
+    js = T([o for o in jouts if o[0] == "guest" and "NotifyGameSetup" in o[1]][0][2])
+    jp = [sub(x) for x in js["PROS"][1]]
+    check("poziom 6: dolaczajacy widzi hosta pod tym samym CONG i DHST", jp[0].get("CONG") == hcong
+          and sub(sub(js["GAME"])["DHST"])["CONG"] == hcong and jp[1]["CONG"] != hcong)
+    gamemgr.reset()
+    gid2, _r, _o = gamemgr.create_game(cfg6, "host", req, ["guest"], lookup)
+    gamemgr.watchdog_expired(cfg6, gid2)
+    gid3, _r, _o = gamemgr.create_game(cfg6, "host", req, ["guest"], lookup)
+    check("poziom 6 bez finalize -> nastepny createGame tego hosta na poziomie 1",
+          gamemgr.attempt_info(gid3)[0] == 1, gamemgr.GAMES[gid3]["variant_why"])
     gamemgr.reset()
 
 
@@ -580,6 +615,7 @@ def run_selftest() -> int:
     check("TDF decoder rejects garbage without crashing", err is not None and fields == [])
 
     _gamemgr_checks()
+    _level6_checks()
     _identity_checks()
     _easw_checks(cfg)
 

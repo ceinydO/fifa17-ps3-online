@@ -43,13 +43,19 @@ class Config:
     #   0  = automatycznie (drabinka): start od 1; po kazdym createGame, ktory doszedl do finalizeGameCreation hosta,
     #        nastepny createGame probuje poziom wyzej; po porazce wraca do najnowszego dzialajacego. Stan w
     #        state/gm_variant.json (przetrwa restart serwera; skasuj plik, zeby zaczac od nowa).
-    #   1..5 = wymuszony poziom, -1 = uzyj pojedynczych przelacznikow gm_deferred_pregame/gm_faithful_flow/
+    #   1..6 = wymuszony poziom, -1 = uzyj pojedynczych przelacznikow gm_deferred_pregame/gm_faithful_flow/
     #        gm_host_initial_state z tego pliku.
     # Domyslnie 1 (bez drabinki): jedyny poziom spojny dla OBU stron wg dekompilacji isHost (README, "How the client
     # decides who is the host"): host BEZ CONG => w stanie PRE_GAME klucz hosta 0 (brak DHST) == punkt koncowy hosta,
     # u hosta i u dolaczajacego (ktory ma wlasny, niezerowy CONG). Poziom 1 konczy createGame u hosta (finalize) od 10-11.
     # Poziomy 3-5 (host z CONG): w PRE_GAME host przestaje byc hostem (2026-10-25: dolaczajacy wyszedl, host padl).
-    gm_variant: int = 1
+    # Domyslnie 6 (od 2026-10-31): test z poziomem 1 pokazal, ze dolaczajacy NIE znajduje hosta bez CONG (CONG 0 nie
+    # jest kluczem punktu koncowego) -- nie startowal sieci i po ~1 s wychodzil. Poziom 6 = poziom 1 + CONG hosta
+    # i DHST.CONG (spojny klucz hosta u obu stron w PRE_GAME); gdy host nie dojdzie do finalize, nastepny createGame
+    # tego hosta automatycznie uzywa poziomu 1 (a dolaczajacy i tak dostaje hosta z CONG -- gm_joiner_host_cong).
+    gm_variant: int = 6
+    # Dolaczajacy dostaje hosta z CONG i DHST nawet wtedy, gdy setup hosta byl bez CONG (poziom 1).
+    gm_joiner_host_cong: bool = True
     # Po FINALIZE_WATCHDOG_SECONDS bez finalizeGameCreation hosta serwer usuwa gre (NotifyGameRemoved), zeby klient
     # wrocil z "please wait" i mozna bylo od razu ponowic (bez restartu RPCS3); kolejny createGame uzyje wlasciwego poziomu.
     gm_watchdog_remove: bool = True

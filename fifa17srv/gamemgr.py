@@ -127,8 +127,18 @@ LEVELS = {
         "connect_host_on_finalize": True,
         "about": "poziom 4 + zarezerwowany kolega w rosterze + nowe pola graczy i gry wg FIFA 17 (CONG, CSID, DSUI, "
                  "EXBL, LOC, NASP, PATT, TIME, UUID; GPVH, SEED, UUID, MNCP, PSAS, MACI), REAS DLSC/CREATE"},
+    6: {"name": "6-pregame-cong", "state": STATE_PRE_GAME, "host_state": PLAYER_CONNECTED,
+        "invitee_in_setup": False, "auto_join": False, "reserved": False, "followups": True, "reason": "legacy",
+        "new_players": False, "new_game": False, "host_cong": True, "user_added": False,
+        "connect_host_on_finalize": False,
+        "about": "poziom 1 (PRE_GAME, stare pola), ale host MA CONG w rosterze i w THST/PHST oraz DHST.CONG = CONG "
+                 "hosta -- ten sam klucz hosta u hosta i u dolaczajacego (test 2026-10-31: bez CONG hosta "
+                 "dolaczajacy nie znajdowal hosta i po ~1 s sam wychodzil); jesli host nie dojdzie do "
+                 "finalizeGameCreation, nastepny createGame tego hosta wraca do poziomu 1"},
 }
-MAX_LEVEL = max(LEVELS)
+MAX_LEVEL = 5                     # najwyzszy poziom starej drabinki auto (poziom 6 tylko wymuszony w config)
+FALLBACK_LEVEL = {6: 1}           # poziom -> poziom zapasowy po nieudanej probie tego hosta
+_FALLBACK_HOSTS: set = set()      # hosty, ktorych ostatnia proba poziomu z FALLBACK_LEVEL nie doszla do finalize
 _VARIANT_LOCK = threading.Lock()
 # Wersja formatu pliku stanu drabinki. Wynik zapisany starszym kodem (np. "poziom 2 nieudany" z testu, w ktorym
 # klient hosta wywalil sie na starej grze GID=1) nie jest wiarygodny -- plik innej wersji jest ignorowany.
@@ -271,6 +281,8 @@ def watchdog_expired(cfg, gid: int):
             return []
         game["failed"] = True
         mark_failed(cfg, game.get("variant"))
+        if game.get("variant") in FALLBACK_LEVEL:
+            _FALLBACK_HOSTS.add(game["host"])
         if not getattr(cfg, "gm_watchdog_remove", True):
             return []
         outs = [(n, "NotifyGameRemoved (watchdog: brak finalizeGameCreation)", notify_game_removed(gid, 0))
@@ -339,6 +351,7 @@ def reset() -> None:
     with GAMES_LOCK:
         GAMES.clear()
         _LAST_ATTEMPT.clear()
+        _FALLBACK_HOSTS.clear()
         _next_game_id[0] = 1
 
 
@@ -666,6 +679,11 @@ def create_game(cfg, host: str, req_fields, others, lookup):
     gmcd = _field(req_fields, "GMCD", []) or []
     cmgd = _field(req_fields, "CMGD", []) or []
     number, why = choose_variant(cfg)
+    with GAMES_LOCK:
+        if number in FALLBACK_LEVEL and host in _FALLBACK_HOSTS:
+            why = (f"poprzednia proba poziomu {number} hosta {host!r} nie doszla do finalizeGameCreation -- "
+                   f"zapasowy poziom {FALLBACK_LEVEL[number]}")
+            number = FALLBACK_LEVEL[number]
     eff = effective_settings(cfg, number)
     with GAMES_LOCK:
         stale = _retire_stale_locked(host)
@@ -774,7 +792,13 @@ def _join_players(cfg, game: dict, joiners, lookup, send_platform_host: bool = T
             label = "NotifyGameSetup (dolaczajacy, DLSC/JOIN)"
         # dolaczajacy dostaje gre w stanie PRE_GAME (SDK odracza graczy dolaczajacych do gry nie w PRE_GAME)
         setup_state = STATE_PRE_GAME if game["state"] == STATE_INITIALIZING else game["state"]
-        outs.append((j, label, notify_game_setup(game, players, game["players"], reason, setup_state)))
+        view = game
+        if getattr(cfg, "gm_joiner_host_cong", True) and not game.get("shape", {}).get("host_cong", True):
+            # Dolaczajacy (PRE_GAME) bierze klucz hosta z DHST.CONG, a CONG 0 nie jest kluczem zadnego punktu
+            # koncowego: bez CONG hosta (poziom 1) nie znajdowal hosta, nie startowal sieci i po ~1 s wychodzil
+            # (test 2026-10-31). Dolaczajacy widzi wiec hosta z jego CONG i z DHST, nawet gdy host sam siebie nie.
+            view = dict(game, shape=dict(game.get("shape", {}), host_cong=True))
+        outs.append((j, label, notify_game_setup(view, players, game["players"], reason, setup_state)))
         if send_platform_host:
             outs.append((j, "NotifyPlatformHostInitialized",
                          notify_platform_host_initialized(game["id"], players[game["host"]]["uid"])))
@@ -954,6 +978,8 @@ def on_disconnect(cfg, name: str, lookup) -> list:
         if (last and not last["finalized"] and last["level"] is not None
                 and time.monotonic() - last["t0"] < CRASH_WINDOW_SECONDS):
             mark_crashed(cfg, last["level"])
+            if last["level"] in FALLBACK_LEVEL:
+                _FALLBACK_HOSTS.add(name)
         for gid in [g["id"] for g in GAMES.values() if name in g["players"]]:
             uid = ids.uid_for(name)
             outs.extend(remove_player(cfg, name, [("GID ", tdf.VARINT, gid), ("PID ", tdf.VARINT, uid),

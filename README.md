@@ -46,6 +46,21 @@ friend, the friend sees the invitation, accepts, both end up in the same Blaze g
 logs for analysis `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` (zip) + `RPCS3.log` of both players;
 selftest `python -m fifa17srv selftest`.
 
+## Latest session: 2026-10-31, second test (identity fixed; the joiner still cannot find the host)
+
+- With the NpId fix the friend now removes **itself** (`removePlayer PID=<friend>`), the host's game survives
+  (`NotifyPlayerRemoved`), and both POW headers carry their own ids. But the friend still leaves ~1 s after its
+  `NotifyGameSetup (DLSC/JOIN)` and never binds a UDP socket - it does not even start the game network.
+- **Conclusion:** CONG 0 is not a valid endpoint key. On level 1 the host has no CONG, so on the joiner (PRE_GAME:
+  host key = `DHST.CONG`, absent -> 0) there is no host endpoint at all. The host itself "works" on level 1 only
+  because "host endpoint" and "my endpoint" are both missing there (equal), which also explains the old flow where
+  every client believed it was the host. The same thing broke the 2026-10-25 level-3 join (host CONG, no DHST).
+- **Fix:** new default **level 6** = level 1 (PRE_GAME, old fields, follow-ups) + the host's CONG in the roster and in
+  `THST/PHST` + `DHST.CONG` = host CONG, so host and joiner agree on the host key. If a host's level-6 attempt does
+  not reach `finalizeGameCreation` (watchdog or crash), that host's next `createGame` falls back to level 1
+  automatically. Independently, the joiner's setup always shows the host with its CONG and `DHST`
+  (`gm_joiner_host_cong`), even when the host's own setup was level 1.
+
 ## Latest session: 2026-10-31 (invite accepted twice, the friend "removed the host")
 
 - Level 1 worked on the host (`finalizeGameCreation`); the invitation was delivered and accepted twice; the friend's
