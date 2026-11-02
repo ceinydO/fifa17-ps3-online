@@ -71,6 +71,14 @@ class Config:
     # Zaproszony gracz dostaje gre jako IndirectJoinGameSetupContext (IJGS) -- jedyna skladowa REAS, przy ktorej
     # SDK klienta bez wlasnego createGame/joinGame doprowadza dolaczenie do konca. False = DatalessSetupContext/JOIN.
     gm_indirect_join: bool = True
+    # joinGame dostaje setup IJGS (IndirectJoinGameSetupContext) zamiast DLSC/JOIN. Test 2026-11-02 + EBOOT: zadanie joinGame
+    # dolaczajacego znika, zanim dojdzie odpowiedz -- callback odpowiedzi (0xc6ba78) bez zadania sam wysyla removePlayer
+    # REAS 7, a handler setupu DLSC bez zadania wychodzi z gry (0xc54d80 -> leaveGameByGroup REAS 8). Przy IJGS handler
+    # (0xc6e3f4) zaklada zadanie zastepcze, przypisuje mu GID i normalnie startuje siec gry (0xc6dad8).
+    gm_join_setup_indirect: bool = True
+    # removePlayer REAS 7 od dolaczajacego wyslany tuz po joinGame (osierocona odpowiedz, patrz wyzej) jest ignorowany:
+    # gracz zostaje w grze, host nie dostaje NotifyPlayerRemoved (test 2026-11-02: to powiadomienie wywalalo hosta).
+    gm_ignore_orphan_join_remove: bool = True
     # Tagi i numery skladowych unii REAS jak w FIFA 17 (DLSC/IJGS, numer = pozycja po tagu). False = ksztalt FIFA 14.
     gm_fifa17_union_tags: bool = True
 

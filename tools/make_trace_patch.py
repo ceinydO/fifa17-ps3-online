@@ -53,43 +53,34 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rpcs3_patch_trac
 #  1 = r4; 6 = r4,LR; 7 = r5 (nazwa), pierwsze dwa argumenty wariadyczne, LR)
 TARGETS = [
     (0x01, "EVT  post_event(this, nazwa_zdarzenia, dane)", 0x015FFB68, 0x01955538, 6),
-    (0x10, "adaptor SendGameInvite (UI -> C++)", 0x016491B4, 0x01955530, 3),
-    (0x15, "puid: wynik wyszukiwania (30262c)", 0x0030262C, 0x0195552C, 3),
     (0x16, "NP: ostatni krok przed sceNpBasicSendMessageGui (302454)", 0x00302454, 0x01955538, 3),
     (0x20, "createGame: callback sukcesu 'GSMR' (2dee08)", 0x002DEE08, 0x0195552C, 3),
-    (0x30, "NP: handler zdarzen basic (zaproszenia/wiadomosci)", 0x00AE0C04, 0x01955534, 3),
-    (0x41, "SportsWorld: LoadSportsWorldUserPresence", 0x0030F2F0, 0x01955534, 3),
-    (0x43, "SportsWorld: LoadSportsWorldUsers", 0x00311FDC, 0x01955538, 3),
     # --- runda 2 (znaczniki 0x53, 0x56-0x5A, 0x5F, 0x60, 0x62, 0x73-0x75, 0x79 usuniete: ta sciezka nie jest uzywana; 0x12-0x14, 0x31 - lancuch potwierdzony) ---
     (0x50, "OSDK trace(kategoria 4cc, zdarzenie 4cc)", 0x002E8448, 0x01955538, 3),
-    (0x51, "GameSessionManager::createGame(parametry, listener)", 0x0028EFA4, 0x01955510, 3),
-    (0x52, "CreateGame op: konstruktor", 0x0028E208, 0x01955518, 3),
-    (0x54, "GameSession: konstruktor", 0x002891E4, 0x01955534, 3),
-    (0x55, "gses::setCurrentSession", 0x002911B8, 0x01955538, 3),
     (0x5B, "Blaze: handler NotifyGameSetup", 0x00C6E0B8, 0x0195551C, 3),
     (0x5C, "Blaze: onNetworkCreated (c6a4e0)", 0x00C6A4E0, 0x01955530, 3),
     (0x5D, "Blaze: wysylka finalizeGameCreation (c6a204)", 0x00C6A204, 0x0195553C, 3),
     (0x5E, "Blaze: odpowiedz na finalizeGameCreation (c6bf74)", 0x00C6BF74, 0x0195553C, 3),
-    (0x61, "FSM poczekalni: konsument zdarzen (4d0aa4)", 0x004D0AA4, 0x01955514, 3),
-    (0x63, "FifaOnline::StartInviteFlowPrep (4cf1f8)", 0x004CF1F8, 0x01955538, 3),
-    (0x64, "GameInviteScreenAbort (4cf2f8)", 0x004CF2F8, 0x0195553C, 3),
     # --- runda 3: kto wola createGame i jaki listener dostaje wynik; wywolania silnik -> skrypty UI ---
-    (0x71, "UI skrypt: wywolanie funkcji 'Handle_<nazwa>' (napisy) (38aca4)", 0x0038ACA4, 0x01955538, 7),
-    (0x72, "UI skrypt: wywolanie funkcji 'Handle_<nazwa>' (obiekt) (38b110)", 0x0038B110, 0x01955538, 7),
-    (0x76, "EVENT_GAME_INVITE_RECEIVED: nadawca zdarzenia (1649774)", 0x01649774, 0x01955544, 3),
-    (0x77, "listener zaproszen: USER_INVITE sukces (16495b4)", 0x016495B4, 0x01955540, 3),
-    (0x78, "listener zaproszen: USER_INVITE porazka (164964c)", 0x0164964C, 0x01955540, 3),
     (0x7E, "GameSessionManager::joinGame (290b18)", 0x00290B18, 0x0195552C, 3),
-    (0x7F, "GameSessionManager::joinGame, wariant (290dd8)", 0x00290DD8, 0x0195552C, 3),
     # --- runda 5: odbior zaproszenia po stronie kolegi (zdarzenie NP 14 -> dane zaproszenia -> InviteHandler -> joinGame) ---
-    (0x80, "NP: zdarzenie 14 'zaproszenie wybrane' (r4=zdarzenie) (2f941c)", 0x002F941C, 0x01955540, 3),
-    (0x83, "NP: odczyt danych wybranego zaproszenia (r4=id) (2f3b50)", 0x002F3B50, 0x01955544, 3),
-    (0x84, "FifaOnline::InviteAccepted -- zdarzenie online (4de29c)", 0x004DE29C, 0x0195553C, 3),
-    (0x85, "UI: GameInviteValidation (4cf0ac)", 0x004CF0AC, 0x01955534, 3),
-    (0x86, "UI: GameInviteJoin (4ce70c)", 0x004CE70C, 0x0195552C, 3),
-    (0x87, "InviteHandler: obsluga InviteAccepted (r4=wsk. na 12 B danych zaproszenia) (4f19d4)", 0x004F19D4, 0x0195553C, 3),
     (0x88, "FifaOnline::NotifyInvitationStatus -- zdarzenie online (6185e8)", 0x006185E8, 0x01955540, 3),
-    (0x89, "FifaOnline::InviteFlowPrepComplete -- zdarzenie online (6184c4)", 0x006184C4, 0x01955540, 3),
+    # --- runda 7 (2026-11-02): dlaczego dolaczajacy po NotifyGameSetup nie startuje sieci (0x41/0x43/0x61/0x71/0x72/0x76
+    # usuniete -- miejsce w jaskini; UI-SKRYPT zasmiecal log) ---
+    (0x90, "Blaze: kontrola wersji protokolu przy dolaczaniu (c6dd2c)", 0x00C6DD2C, 0x01955528, 3),
+    (0x91, "Blaze: zakonczenie zadania gdy gracz nieaktywny (c5b8c0)", 0x00C5B8C0, 0x01955528, 3),
+    (0x92, "Blaze: start sieci gry (c6dad8)", 0x00C6DAD8, 0x01955538, 3),
+    (0x93, "Blaze: Game::leave -> leaveGameByGroup (c54d80) r6=flaga", 0x00C54D80, 0x01955524, 5),
+    (0x94, "Blaze: Game::leave/zniszczenie (c55d14) r4=powod", 0x00C55D14, 0x01955534, 3),
+    (0x95, "Blaze: zadanie = matchmaking? (c6a2f4)", 0x00C6A2F4, 0x0195552C, 3),
+    (0x96, "Blaze: utworzenie lokalnej gry (c69ed0)", 0x00C69ED0, 0x01955514, 3),
+    (0x97, "GameSession: opuszczenie gry (28a79c)", 0x0028A79C, 0x0195553C, 3),
+    (0x98, "Blaze: wynik tworzenia sieci (c6a92c)", 0x00C6A92C, 0x01955530, 3),
+    (0x9E, "Blaze: wysylka joinGame + utworzenie zadania (c66c00)", 0x00C66C00, 0x0195550C, 3),
+    (0x9F, "Blaze: odpowiedz na joinGame (r4=odp., r6=blad; brak zadania -> removePlayer REAS 7) (c6ba78)",
+     0x00C6BA78, 0x01955530, 5),
+    (0xA0, "Scheduler: usuniecie zadania (r4=zadanie, LR=kto) (caf808)", 0x00CAF808, 0x01955540, 3),
+    (0xA1, "Scheduler: usuniecie zadania, wariant (r4=jobId?, LR=kto) (caf760)", 0x00CAF760, 0x01955540, 3),
 ]
 
 # Znaczniki w srodku funkcji: (id, nazwa, adres instrukcji A, jej slowo, tryb).  Podmieniana instrukcja musi byc
@@ -97,6 +88,12 @@ TARGETS = [
 MIDS = [
     (0x70, "createGame (GSMR) tuz przed `mtctr r5`: r3=listener, r4=sesja, r5=KOD listenera, ktory zaraz zostanie wywolany",
      0x002DEF74, 0x7CA903A6, 3),                                  # mtctr r5 (a potem bdnzctrl @ 2def78)
+    # runda 7: rozgalezienia handlera NotifyGameSetup (c6e0b8) po stronie dolaczajacego
+    (0x9A, "NotifyGameSetup: r3 = zadanie znalezione po GID (0 = brak zadania joinGame/createGame)",
+     0x00C6E0E8, 0x607E0000, 3),                                  # ori r30,r3,0 tuz po bl c5bb54
+    (0x9B, "NotifyGameSetup: r3 = wynik kontroli wersji (0 = odrzucone)", 0x00C6EA3C, 0x2C030000, 3),   # cmpwi r3,0
+    (0x9C, "NotifyGameSetup: r3 = lokalny gracz, r6 = jego stan (2..5 = aktywny)", 0x00C6EAB0, 0x2C060004, 5),
+    (0x9D, "NotifyGameSetup: r3 = id hosta topologii (0 = brak -> koniec bez sieci)", 0x00C6EC9C, 0x2C230000, 3),
 ]
 
 
@@ -1054,7 +1051,7 @@ def selftest():
         for n in range(1, 14):
             if e.f[n] != before[1][n]: problems.append("f%d" % n)
         if e.ctr != ref.ctr: problems.append("ctr")
-        if e.cr != before[3]: problems.append("cr")
+        if e.cr != ref.cr: problems.append("cr")
         want = _want_log(mid, mode, before[0], before[0][0], e)
         if logged != want:
             problems.append("log %s != %s" % ([hex(x) for x in logged], [hex(x) for x in want]))

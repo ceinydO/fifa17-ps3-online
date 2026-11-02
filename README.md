@@ -46,6 +46,30 @@ friend, the friend sees the invitation, accepts, both end up in the same Blaze g
 logs for analysis `powershell -ExecutionPolicy Bypass -File .\collect_logs.ps1` (zip) + `RPCS3.log` of both players;
 selftest `python -m fifa17srv selftest`.
 
+## Latest session: 2026-11-02 (level 6 works on the host; the joiner's join job is gone - EBOOT analysis)
+
+- Level 6 finalized on the host. The friend again left ~60 ms after `joinGame`: `removePlayer REAS 7`, then `0x16`
+  (leaveGameByGroup) `REAS 8`, without starting its game network. The host then crashed (`0x2d7184`, NULL from the
+  FIFA user lookup `0x288658` while handling the friend's removal).
+- **EBOOT (capstone, no Ghidra in this container):**
+  * Blaze `joinGame` (`0xc66c00`) creates a JoinGameJob (`0xd0` B, ctor `0xc653c4`), registers it in the scheduler and
+    sends the RPC with the response callback `0xc6ba78`.
+  * `0xc6ba78`: `job = scheduler.getJob(jobId)`; **job missing + no error -> it sends `removePlayer(gid, REAS 7)`**
+    (`li r3,7` @ `0xc6bb38`, cmd `0xb`); job present -> `0xc6ba00` assigns the GID to the job (map `api+0x4c` per user).
+  * NotifyGameSetup handler `0xc6e0b8`: job looked up by GID (`0xc5bb54`). No job + `DLSC` with DCTX != 0 ->
+    `0xc54d80` = Game::leave with reason 8 -> `leaveGameByGroup` (`0x16`, REAS 8). No job + `IJGS` (or IMSC) ->
+    `0xc6e3f4` creates a placeholder job, gives it the GID and continues normally: version check `0xc6dd2c` (skipped
+    with RPVC=0), local player state 2..5, topology host != 0 -> network start `0xc6dad8`.
+  * So the joiner's job was already gone when the reply arrived (why is not known yet - new trace markers).
+- **Fix:** `joinGame` now answers with an `IJGS` setup (`gm_join_setup_indirect`), so the client builds the
+  placeholder job itself; the orphaned `removePlayer REAS 7` that the reply callback sends within 5 s of `joinGame`
+  is ignored (`gm_ignore_orphan_join_remove`): the player stays, the host gets no `NotifyPlayerRemoved` (which is
+  what crashed it).
+- **Trace round 7** (`tools/rpcs3_patch_trace_invites.yml`): markers `0x90`-`0xA1` on the joiner path (version check,
+  network start, Game::leave, local game creation, network result, Blaze joinGame, its reply callback, scheduler job
+  removal with caller) and mid-function markers `0x9A`-`0x9D` (job found by GID, version-check result, local player
+  + state, topology host id). Removed markers of the confirmed invite chain and the noisy UI-script hooks (cave space).
+
 ## Latest session: 2026-10-31, second test (identity fixed; the joiner still cannot find the host)
 
 - With the NpId fix the friend now removes **itself** (`removePlayer PID=<friend>`), the host's game survives

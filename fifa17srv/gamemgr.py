@@ -885,6 +885,17 @@ def update_mesh_connection(cfg, name: str, req_fields, lookup) -> list:
 
 
 # --------------------------------------------------------------------------------- wychodzenie z gry
+_IGNORED_REMOVE: set = set()      # gracze, ktorych ostatni removePlayer zostal zignorowany (do logu)
+
+
+def last_remove_ignored(name: str) -> bool:
+    return name in _IGNORED_REMOVE
+
+
+REMOVE_REASON_ORPHAN_JOIN = 7     # removePlayer z callbacku odpowiedzi joinGame bez zadania (EBOOT 0xc6bb38: li r3,7)
+ORPHAN_JOIN_WINDOW = 5.0          # sekundy po joinGame, w ktorych taki removePlayer jest ignorowany
+
+
 def remove_player(cfg, name: str, req_fields, lookup) -> list:
     """removePlayer (0x0B): {BTPL, CNTX, GID, PID, REAS, SCTX}."""
     gid = _field(req_fields, "GID", 0) or 0
@@ -898,6 +909,16 @@ def remove_player(cfg, name: str, req_fields, lookup) -> list:
         target = _find_by_uid(game, pid) if pid else name
         if target is None:
             target = name
+        joined_at = game.get("join_t", {}).get(target)
+        if (getattr(cfg, "gm_ignore_orphan_join_remove", True) and reason == REMOVE_REASON_ORPHAN_JOIN
+                and target == name and target != game["host"] and joined_at is not None
+                and time.monotonic() - joined_at < ORPHAN_JOIN_WINDOW and target not in game["completed"]):
+            # Odpowiedz na joinGame trafila u klienta na usuniete juz zadanie (0xc6ba78) i klient automatycznie
+            # wycofuje gracza; setup IJGS zaraz potem prowadzi dolaczenie dalej z zadaniem zastepczym -- zostawiamy go.
+            game["ignored_removes"] = game.get("ignored_removes", 0) + 1
+            _IGNORED_REMOVE.add(name)
+            return []
+        _IGNORED_REMOVE.discard(name)
         outs = []
         if target == game["host"]:
             # tworca wyszedl -- bez migracji hosta gra konczy sie dla wszystkich
@@ -935,7 +956,9 @@ def join_game(cfg, name: str, req_fields, lookup):
         game = GAMES.get(gid)
         if game is None:
             return None, []
-        outs = _join_players(cfg, game, [name], lookup, context="join")
+        context = "indirect" if getattr(cfg, "gm_join_setup_indirect", True) else "join"
+        outs = _join_players(cfg, game, [name], lookup, context=context)
+        game.setdefault("join_t", {})[name] = time.monotonic()
         return join_game_response_fields(gid), outs
 
 

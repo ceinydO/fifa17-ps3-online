@@ -103,7 +103,7 @@ def _gamemgr_checks() -> None:
     check("dolaczajacy (poziom 1): host z CONG i DHST.CONG = CONG hosta (klucz hosta w PRE_GAME), kolega z wlasnym "
           "CONG w CONNECTING", len(gp) == 2 and gp[0].get("CONG") == hcong and gp[1]["CONG"] == gcong != hcong
           and gp[1]["STAT"] == 2 and sub(gg["DHST"])["CONG"] == hcong and sub(gg["THST"])["CONG"] == hcong
-          and gst["REAS"][1][0] == "DLSC" and gst["REAS"][1][2] == [("DCTX", tdf.VARINT, 1)])
+          and gst["REAS"][0] == 1 and gst["REAS"][1][0] == "IJGS" and gst["REAS"][1][2] == [("RPVC", tdf.VARINT, 0)])
     mesh = gamemgr.update_mesh_connection(
         cfg1, "guest", [("GID ", tdf.VARINT, gid), ("STAT", tdf.VARINT, 2),
                         ("TCG ", tdf.OBJID, ids.connection_group_objid_for("host"))], lookup)
@@ -166,8 +166,8 @@ def _gamemgr_checks() -> None:
     j4 = gamemgr.finalize_game(cfg4, "host", [("GID ", tdf.VARINT, gid4)], lookup)
     jr4, jo4 = gamemgr.join_game(cfg4, "guest", [("GID ", tdf.VARINT, gid4)], lookup)
     gs4 = T(setups(jo4, "guest")[0][2])
-    check("poziom 5: dolaczajacy dostaje DLSC/JOIN i unikalny CONG",
-          gs4["REAS"][1][0] == "DLSC" and sub(gs4["PROS"][1][1])["CONG"] == gcong != hcong)
+    check("poziom 5: dolaczajacy dostaje IJGS (zadanie zastepcze u klienta) i unikalny CONG",
+          gs4["REAS"][0] == 1 and gs4["REAS"][1][0] == "IJGS" and sub(gs4["PROS"][1][1])["CONG"] == gcong != hcong)
     g4 = sub(gs4["GAME"])
     check("poziom 5: setup dolaczajacego (PRE_GAME) ma DHST z CONG hosta -- klient szuka hosta po DHST.CONG",
           g4.get("GSTA") == gamemgr.STATE_PRE_GAME and "DHST" in g4 and sub(g4["DHST"]).get("CONG") == hcong
@@ -276,6 +276,16 @@ def _level6_checks() -> None:
     jp = [sub(x) for x in js["PROS"][1]]
     check("poziom 6: dolaczajacy widzi hosta pod tym samym CONG i DHST", jp[0].get("CONG") == hcong
           and sub(sub(js["GAME"])["DHST"])["CONG"] == hcong and jp[1]["CONG"] != hcong)
+    guid = ids.uid_for("guest")
+    rm = lambda reas: [("GID ", tdf.VARINT, gid), ("PID ", tdf.VARINT, guid), ("REAS", tdf.VARINT, reas)]
+    ign = gamemgr.remove_player(cfg6, "guest", rm(7), lookup)
+    check("removePlayer REAS 7 tuz po joinGame (osierocona odpowiedz u klienta) jest ignorowany -- gracz zostaje, "
+          "host nie dostaje NotifyPlayerRemoved", ign == [] and "guest" in gamemgr.GAMES[gid]["players"]
+          and gamemgr.last_remove_ignored("guest"))
+    real = gamemgr.remove_player(cfg6, "guest", rm(6), lookup)
+    check("zwykle wyjscie dolaczajacego (inny REAS) nadal usuwa go z gry",
+          any(o[0] == "host" and "NotifyPlayerRemoved" in o[1] for o in real)
+          and "guest" not in gamemgr.GAMES[gid]["players"] and not gamemgr.last_remove_ignored("guest"))
     gamemgr.reset()
     gid2, _r, _o = gamemgr.create_game(cfg6, "host", req, ["guest"], lookup)
     gamemgr.watchdog_expired(cfg6, gid2)

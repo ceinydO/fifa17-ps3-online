@@ -1316,7 +1316,10 @@ def handle(conn: socket.socket, addr, cfg: Config, ctx: ssl.SSLContext) -> None:
                         resp = build_reply(component, command, msg_num, b"")
                         outs = gamemgr.remove_player(cfg, me, fields, _lookup_player)
                         cap.note(f"-> removePlayer od {me!r} GID={_find_field(fields, 'GID')} "
-                                 f"PID={_find_field(fields, 'PID')}: {len(outs)} powiadomien")
+                                 f"PID={_find_field(fields, 'PID')} REAS={_find_field(fields, 'REAS')}: "
+                                 f"{len(outs)} powiadomien"
+                                 + (" (ZIGNOROWANE: osierocona odpowiedz joinGame u klienta, gracz zostaje w grze)"
+                                    if gamemgr.last_remove_ignored(me) else ""))
                     elif command == gamemgr.CMD_DESTROY_GAME:
                         resp = build_reply(component, command, msg_num, b"")
                         outs = gamemgr.destroy_game(cfg, me, fields, _lookup_player)
